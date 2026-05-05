@@ -4398,6 +4398,22 @@ class TestAuditCommandParser:
         assert captured["workers"] == 4
         assert captured["resume"] is True
 
+    def test_unknown_dash_option_errors(self, monkeypatch, tmp_path):
+        from swival.audit import run_audit_command
+
+        _capture_run_audit_phases(monkeypatch)
+        result = run_audit_command("-resume", _make_ctx(tmp_path))
+        assert result.startswith("error:")
+        assert "-resume" in result
+
+    def test_unknown_double_dash_option_errors(self, monkeypatch, tmp_path):
+        from swival.audit import run_audit_command
+
+        _capture_run_audit_phases(monkeypatch)
+        result = run_audit_command("--bogus", _make_ctx(tmp_path))
+        assert result.startswith("error:")
+        assert "--bogus" in result
+
 
 class TestSelectAll:
     """Tests for the /audit --all flag (skip Phase 2 triage)."""

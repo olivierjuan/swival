@@ -3002,6 +3002,12 @@ def run_audit_command(cmd_arg: str, ctx: InputContext) -> str:
                 workers = int(parts[i])
             except ValueError:
                 return f"error: --workers requires an integer, got {parts[i]!r}"
+        elif parts[i].startswith("-"):
+            return (
+                f"error: unknown option {parts[i]!r}. "
+                f"Known flags: --resume, --regen, --debug, --all, "
+                f"--measure-triage, --workers N."
+            )
         else:
             filtered.append(parts[i])
         i += 1
