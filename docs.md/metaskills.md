@@ -8,16 +8,6 @@ They are a dynamic extension to a regular agent
 skill: they sit next to a normal `SKILL.md` file and help an agent do the parts
 of a task that should be repeatable, bounded, and easy to inspect.
 
-This document is for two groups:
-
-- Skill authors who want to package a practical workflow.
-- Agent implementers who want to support the same metaskill packages in their
-  own host.
-
-The specification is host-neutral. "Host" means the AI agent application that
-discovers skills, runs metaskill programs, calls models and tools, enforces
-sandboxing, and records what happened.
-
 ## 1. The Problem MetaSKILLs Solve
 
 Static skills are great when the useful thing is instruction:
