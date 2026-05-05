@@ -74,6 +74,7 @@
 <li><a href="llm-filter.html">Outbound LLM Filter</a></li>
 <li><a href="command-middleware.html">Command Middleware</a></li>
 <li><a href="skills.html">Skills</a></li>
+<li><a href="metaskills.html">Metaskills</a></li>
 <li><a href="web-browsing.html">Web Browsing</a></li>
 <li><a href="mcp.html">MCP</a></li>
 <li><a href="a2a.html">A2A</a></li>
@@ -155,6 +156,16 @@ swival --commands ask &quot;Run the tests&quot;
 <p><code>run_shell_command</code> is only available with <code>--commands all</code> or <code>--yolo</code>. It does not appear in ask mode or whitelist mode, since shell strings bypass command-level policy controls.</p>
 <h2 id="use_skill"><code>use_skill</code></h2>
 <p>When skills are discovered, Swival exposes <code>use_skill</code> so the model can load full instructions on demand. The system prompt only includes a compact skill catalog at startup, and full skill instructions are injected only when the tool is called. This keeps the default prompt smaller while still allowing rich task-specific guidance.</p>
+<h2 id="run_metaskill"><code>run_metaskill</code></h2>
+<p>When executable <a href="metaskills.html">Agent MetaSKILLs</a> are discovered, Swival exposes <code>run_metaskill</code> so the model can execute dynamic skill workflows. Parameters:</p>
+<ul>
+<li><code>name</code> (required) — The metaskill name to execute. Constrained to an enum of discovered metaskill names.</li>
+<li><code>input</code> — A JSON object passed to the metaskill program as <code>input</code>.</li>
+<li><code>max_ask_calls</code> — Override the nested model call budget (default 5).</li>
+<li><code>max_command_calls</code> — Override the command call budget (default 10, 0 disables commands).</li>
+</ul>
+<p>The tool returns a string. On success: a <code>[Metaskill: name completed]</code> header followed by a JSON result envelope. On failure: a string starting with <code>error:</code>.</p>
+<p>MetaSKILLs run with a private transcript so nested model calls don't flood the parent conversation context. They inherit the session's model, sandbox, command policy, and reporting.</p>
 <h2 id="snapshot"><code>snapshot</code></h2>
 <p><code>snapshot</code> is a context management tool for collapsing exploration into compact summaries. When the model spends many turns reading files, grepping, and reasoning before arriving at a conclusion, <code>snapshot</code> lets it collapse all of that into a single short message so the context window stays clean for the actual work.</p>
 <p>For the full picture of how this fits into Swival's context management architecture, see <a href="context-management.html">Context Management</a>.</p>

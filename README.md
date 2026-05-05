@@ -263,6 +263,8 @@ Full documentation is available at [swival.dev](https://swival.dev/).
 - [Safety and Sandboxing](docs.md/safety-and-sandboxing.md) -- path resolution,
   symlink protection, filesystem access modes, command execution modes
 - [Skills](docs.md/skills.md) -- creating and using SKILL.md-based agent skills
+- [Metaskills](docs.md/metaskills.md) -- portable dynamic skill workflow
+  specification for users and agent implementers
 - [Customization](docs.md/customization.md) -- config files, project instructions,
   system prompt overrides, tuning parameters
 - [Context Management](docs.md/context-management.md) -- compaction, snapshots,

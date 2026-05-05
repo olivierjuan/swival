@@ -52,6 +52,7 @@ cache = true
 # no_a2a = false           # disable A2A agent connections
 # no_instructions = false  # skip CLAUDE.md and AGENTS.md loading
 # no_skills = false        # disable skill discovery
+# metaskills = "local"     # "local", "all", or "off"
 # no_memory = false        # skip auto-memory loading
 # memory_full = false      # inject entire MEMORY.md instead of budgeted retrieval
 # no_history = false       # disable HISTORY.md writes

@@ -117,6 +117,19 @@ Timeout defaults to 30 seconds and is clamped to a maximum of 120 seconds. Inlin
 
 When skills are discovered, Swival exposes `use_skill` so the model can load full instructions on demand. The system prompt only includes a compact skill catalog at startup, and full skill instructions are injected only when the tool is called. This keeps the default prompt smaller while still allowing rich task-specific guidance.
 
+## `run_metaskill`
+
+When executable [Agent MetaSKILLs](metaskills.md) are discovered, Swival exposes `run_metaskill` so the model can execute dynamic skill workflows. Parameters:
+
+- `name` (required) — The metaskill name to execute. Constrained to an enum of discovered metaskill names.
+- `input` — A JSON object passed to the metaskill program as `input`.
+- `max_ask_calls` — Override the nested model call budget (default 5).
+- `max_command_calls` — Override the command call budget (default 10, 0 disables commands).
+
+The tool returns a string. On success: a `[Metaskill: name completed]` header followed by a JSON result envelope. On failure: a string starting with `error:`.
+
+MetaSKILLs run with a private transcript so nested model calls don't flood the parent conversation context. They inherit the session's model, sandbox, command policy, and reporting.
+
 ## `snapshot`
 
 `snapshot` is a context management tool for collapsing exploration into compact summaries. When the model spends many turns reading files, grepping, and reasoning before arriving at a conclusion, `snapshot` lets it collapse all of that into a single short message so the context window stays clean for the actual work.

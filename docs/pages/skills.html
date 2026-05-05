@@ -74,6 +74,7 @@
 <li><a href="llm-filter.html">Outbound LLM Filter</a></li>
 <li><a href="command-middleware.html">Command Middleware</a></li>
 <li><a href="skills.html" class="active">Skills</a></li>
+<li><a href="metaskills.html">Metaskills</a></li>
 <li><a href="web-browsing.html">Web Browsing</a></li>
 <li><a href="mcp.html">MCP</a></li>
 <li><a href="a2a.html">A2A</a></li>
@@ -148,6 +149,10 @@ and `staging` for staging.
 <p>The catalog includes guidance telling the model that if a task clearly matches a skill's description, it should use that skill. This reduces the chance of the model ignoring available skills.</p>
 <h2 id="file-access-for-external-skills">File Access For External Skills</h2>
 <p>Project-local skills are already inside normal sandbox roots, so they use standard file access rules. External skills (including global skills) are automatically added as read-only roots at session setup time. That means the model can read helper files under those skill directories with absolute paths, but cannot write into those external skill directories.</p>
+<h2 id="agent-metaskills">Agent MetaSKILLs</h2>
+<p>A skill directory can also contain a program file (<code>SKILL.star</code>) that turns it into an Agent MetaSKILL — a dynamic workflow that runs bounded loops with nested model calls, command execution, and structured tracing. When a <code>SKILL.star</code> file is present (or the <code>metaskill</code> frontmatter field points to one), Swival exposes the <code>run_metaskill</code> tool alongside <code>use_skill</code>.</p>
+<p>MetaSKILLs use Starlark as their runtime language and expose three host functions: <code>ask()</code>, <code>command()</code>, and <code>trace()</code>. Local metaskills execute by default; external metaskills require <code>--metaskills all</code> or <code>metaskills = "all"</code> in config.</p>
+<p>See the <a href="metaskills.html">Agent MetaSKILLs specification</a> for the full format, host API, budgets, and authoring guide.</p>
         </article>
     </div>
     <footer class="site-footer">

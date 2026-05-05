@@ -92,6 +92,11 @@ NAV = [
             ),
             ("skills", "Skills", "Creating and using SKILL.md-based agent skills"),
             (
+                "metaskills",
+                "Metaskills",
+                "Portable standard for dynamic SKILL.md workflow programs",
+            ),
+            (
                 "web-browsing",
                 "Web Browsing",
                 "Chrome DevTools MCP, agent-browser, and Lightpanda",

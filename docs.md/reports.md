@@ -127,6 +127,8 @@ For `repl_turn`, fields include `turn_offset` (the cumulative turn count at the 
 
 For `session_clear`, the event marks that a `/clear` or `/new` command reset the conversation state. No additional fields. These events appear only in REPL reports.
 
+For Agent MetaSKILL events: `metaskill_start` includes `name` and `language`. `metaskill_step` includes `operation` (`ask` or `command`), `purpose` or `argv`, `duration_s`, and `success`. `metaskill_finish` includes `name`, `status`, and `duration_s`. `metaskill_error` includes `name` and `error`. These events appear when `run_metaskill` is called.
+
 ## Benchmarking Workflow
 
 A standard pattern is to run the same task set against multiple models or settings and then compare their report files. Passing `--seed` can reduce run-to-run variance for providers that support seeded sampling.

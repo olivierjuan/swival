@@ -74,6 +74,7 @@
 <li><a href="llm-filter.html">Outbound LLM Filter</a></li>
 <li><a href="command-middleware.html">Command Middleware</a></li>
 <li><a href="skills.html">Skills</a></li>
+<li><a href="metaskills.html">Metaskills</a></li>
 <li><a href="web-browsing.html">Web Browsing</a></li>
 <li><a href="mcp.html">MCP</a></li>
 <li><a href="a2a.html">A2A</a></li>
@@ -134,6 +135,7 @@ print(answer)
     no_instructions: bool = False,
     no_skills: bool = False,
     skills_dir: list[str] | None = None,
+    metaskills: str = &quot;local&quot;,  # &quot;local&quot;, &quot;all&quot;, or &quot;off&quot;
     allowed_dirs: list[str] | None = None,
     allowed_dirs_ro: list[str] | None = None,
     sandbox: str = &quot;builtin&quot;,

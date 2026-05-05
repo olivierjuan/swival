@@ -1647,6 +1647,19 @@ wheels = [
 ]
 
 [[package]]
+name = "starlark-go"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/4a/f610da5799a6938df9ac67402ccff671822b1908a8865d612be19a0b0ac7/starlark_go-1.0.1.tar.gz", hash = "sha256:c46911421e395971b2bf84e49a55475aee7e25a4de4963afbf6137db91509adc", size = 42732, upload-time = "2025-12-09T23:50:30.736Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/f4/f8def2853c2bc6916a7c397c5ca2d3a09a497abf999344595a4a8f109e2f/starlark_go-1.0.1-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:6ba76ec8f3fa8dd7864ab711e08358591cd7718455512f99fd72e906c17f158a", size = 1217840, upload-time = "2025-12-09T23:50:10.122Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/2a/ddc03cdcfc799e5717bca655fc795e38859492ed2fce71b876e3852bda31/starlark_go-1.0.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bcf790476480e634f3de26a76b2b3ac6c3d7f50962e0f3dc22246307e7451a8a", size = 1134175, upload-time = "2025-12-09T23:50:11.646Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/6d/d8161f25e5256032a374f2909180e13d792f57d5453841cffcb495e85a2f/starlark_go-1.0.1-cp313-cp313-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl", hash = "sha256:01029c725787ee0615cea48b207195da67fe6366796c6c1acac565c778f17f5a", size = 1190636, upload-time = "2025-12-09T23:50:13.124Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/a2/590674c1c06e609e2cb991cd2abbbbc3d820d5d800f386c4f46f7c77fa63/starlark_go-1.0.1-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:36e5ad96d6be21295aaf471044c30ed58439f4e0790c243288c94d2e1b49547f", size = 1179563, upload-time = "2025-12-09T23:50:14.323Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/51/236917057e28931cc8ba5aa3364b8991f0748cf28497c348fe31a8c28d48/starlark_go-1.0.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e5d74958f84c5458ea61fee6f6237a13e823757936528d752dc92cffb7b5e319", size = 1087371, upload-time = "2025-12-09T23:50:15.744Z" },
+]
+
+[[package]]
 name = "starlette"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1672,6 +1685,7 @@ dependencies = [
     { name = "prompt-toolkit" },
     { name = "rank-bm25" },
     { name = "rich" },
+    { name = "starlark-go" },
     { name = "starlette" },
     { name = "tiktoken" },
     { name = "uvicorn" },
@@ -1698,6 +1712,7 @@ requires-dist = [
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "rich", specifier = ">=15.0.0" },
+    { name = "starlark-go", specifier = ">=1.0.0" },
     { name = "starlette", specifier = ">=1.0.0" },
     { name = "tiktoken", specifier = ">=0.12" },
     { name = "uvicorn", specifier = ">=0.46.0" },

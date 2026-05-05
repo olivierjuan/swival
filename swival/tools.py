@@ -629,6 +629,38 @@ USE_SKILL_TOOL = {
     },
 }
 
+RUN_METASKILL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "run_metaskill",
+        "description": "Run a dynamic skill workflow by name.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The metaskill name to execute.",
+                },
+                "input": {
+                    "type": "object",
+                    "description": "Input data for the metaskill. Must include the keys the skill expects (check skill instructions for required keys like task, heading, etc.).",
+                },
+                "max_ask_calls": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum nested model calls (default 5).",
+                },
+                "max_command_calls": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Maximum command calls (default 10).",
+                },
+            },
+            "required": ["name", "input"],
+        },
+    },
+}
+
 RUN_COMMAND_TOOL = {
     "type": "function",
     "function": {
@@ -3124,6 +3156,24 @@ def dispatch(name: str, args: dict, base_dir: str, **kwargs) -> str:
         catalog = kwargs.get("skills_catalog", {})
         read_roots = kwargs.get("skill_read_roots", [])
         return activate_skill(args["name"], catalog, read_roots)
+    elif name == "run_metaskill":
+        from .metaskills import run_metaskill as _run_metaskill
+
+        catalog = kwargs.get("skills_catalog", {})
+        metaskill_loop_kwargs = kwargs.get("metaskill_loop_kwargs") or {}
+        return _run_metaskill(
+            args["name"],
+            args.get("input"),
+            skills_catalog=catalog,
+            metaskills_policy=metaskill_loop_kwargs.get("metaskills_policy", "local"),
+            loop_kwargs=metaskill_loop_kwargs,
+            tools=metaskill_loop_kwargs.get("tools", []),
+            cancel_flag=kwargs.get("cancel_flag"),
+            report=_report,
+            verbose=kwargs.get("verbose", False),
+            max_ask_calls=args.get("max_ask_calls"),
+            max_command_calls=args.get("max_command_calls"),
+        )
     elif name in ("run_command", "run_shell_command"):
         prefer_shell = name == "run_shell_command"
         shell_ok = kwargs.get("shell_allowed", False)

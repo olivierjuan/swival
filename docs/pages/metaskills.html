@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Metaskills — Swival</title>
+    <meta name="description" content="Metaskills: Portable standard for dynamic SKILL.md workflow programs">
+    <link rel="canonical" href="https://swival.dev/pages/metaskills.html">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Metaskills — Swival">
+    <meta property="og:description" content="Metaskills: Portable standard for dynamic SKILL.md workflow programs">
+    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:url" content="https://swival.dev/pages/metaskills.html">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Metaskills — Swival">
+    <meta name="twitter:description" content="Metaskills: Portable standard for dynamic SKILL.md workflow programs">
+    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Metaskills — Swival",
+        "description": "Metaskills: Portable standard for dynamic SKILL.md workflow programs",
+        "url": "https://swival.dev/pages/metaskills.html",
+        "publisher": {
+            "@type": "Organization",
+            "name": "Swival",
+            "logo": { "@type": "ImageObject", "url": "https://swival.dev/img/logo.png" }
+        },
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "Swival",
+            "url": "https://swival.dev/"
+        }
+    }
+    </script>
+    <link rel="icon" href="../favicon.ico">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="site-header">
+        <div class="header-inner">
+            <a href="../" class="header-logo">
+                <img src="../img/logo.png" alt="Swival">
+            </a>
+            <nav class="header-nav">
+                <a href="./">Docs</a>
+                <a href="https://github.com/swival/swival">GitHub</a>
+            </nav>
+        </div>
+    </header>
+    <div class="docs-layout">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+<h4>Basics</h4>
+<ul>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="usage.html">Usage</a></li>
+<li><a href="tools.html">Tools</a></li>
+<li><a href="audit.html">Security Audit</a></li>
+<li><a href="goal.html">Goals</a></li>
+<li><a href="context-management.html">Context Management</a></li>
+<li><a href="open-models.html">Not Just for Frontier Models</a></li>
+</ul>
+</div>
+<div class="sidebar-section">
+<h4>Configuration & Deployment</h4>
+<ul>
+<li><a href="safety-and-sandboxing.html">Safety & Sandboxing</a></li>
+<li><a href="secrets.html">Secret Encryption</a></li>
+<li><a href="llm-filter.html">Outbound LLM Filter</a></li>
+<li><a href="command-middleware.html">Command Middleware</a></li>
+<li><a href="skills.html">Skills</a></li>
+<li><a href="metaskills.html" class="active">Metaskills</a></li>
+<li><a href="web-browsing.html">Web Browsing</a></li>
+<li><a href="mcp.html">MCP</a></li>
+<li><a href="a2a.html">A2A</a></li>
+<li><a href="acp.html">ACP</a></li>
+<li><a href="lifecycle-hooks.html">Lifecycle Hooks</a></li>
+<li><a href="custom-commands.html">Custom Commands</a></li>
+<li><a href="customization.html">Customization</a></li>
+<li><a href="providers.html">Providers</a></li>
+<li><a href="reports.html">Reports</a></li>
+<li><a href="reviews.html">Reviews</a></li>
+<li><a href="agentfs.html">AgentFS</a></li>
+</ul>
+</div>
+<div class="sidebar-section">
+<h4>Reference</h4>
+<ul>
+<li><a href="python-api.html">Python API</a></li>
+</ul>
+</div>
+        </aside>
+        <article class="docs-content">
+            <h1 id="agent-metaskills-specification">Agent MetaSKILLs Specification</h1>
+<p>Agent MetaSKILLs are small workflow programs for AI agents. They sit next to a
+normal <code>SKILL.md</code> file and help an agent do the parts of a task that should be
+repeatable, bounded, and easy to inspect.</p>
+<p>This document is for two groups:</p>
+<ul>
+<li>Skill authors who want to package a practical workflow.</li>
+<li>Agent implementers who want to support the same metaskill packages in their
+  own host.</li>
+</ul>
+<p>The specification is host-neutral. "Host" means the AI agent application that
+discovers skills, runs metaskill programs, calls models and tools, enforces
+sandboxing, and records what happened.</p>
+<h2 id="1-the-problem-metaskills-solve">1. The Problem Metaskills Solve</h2>
+<p>Static skills are great when the useful thing is instruction:</p>
+<pre><code class="language-text">When deploying, run the deploy command, check the health endpoint, and report
+the result.
+</code></pre>
+<p>But many useful agent workflows are not just instructions. They are loops:</p>
+<ul>
+<li>Generate an answer, check whether it contains required pieces, and retry if
+  it does not.</li>
+<li>Run tests, send the failures back to the agent, and stop when the tests pass.</li>
+<li>Ask for a patch, review it, ask for a fix, and keep a trace of each round.</li>
+<li>Call a verifier after each attempt and return a compact summary of the final
+  result.</li>
+</ul>
+<p>You can describe those loops in Markdown, but then the model has to remember and
+execute the loop correctly every time. That is fragile. A metaskill makes the
+loop explicit:</p>
+<ul>
+<li>The workflow has a real attempt limit.</li>
+<li>Commands go through the host's normal policy.</li>
+<li>Nested model calls are counted.</li>
+<li>The final result has a predictable JSON shape.</li>
+<li>A trace shows which steps ran.</li>
+</ul>
+<p>In short: use a static skill for guidance; use a metaskill when the skill needs
+to run a small, repeatable procedure.</p>
+<h2 id="2-a-tiny-metaskill">2. A Tiny Metaskill</h2>
+<p>A metaskill is a skill directory with two files:</p>
+<pre><code class="language-text">skills/
+  require-heading/
+    SKILL.md
+    SKILL.star
+</code></pre>
+<p><code>SKILL.md</code> describes when the skill should be used and documents the expected
+input keys:</p>
+<pre><code class="language-markdown">---
+name: require-heading
+description: Draft text and retry until it includes a required heading.
+metaskill: SKILL.star
+metaskill_language: starlark
+---
+
+Use this when the user wants a short draft that must include one exact heading.
+
+Input keys:
+- `task`: The writing task description.
+- `heading`: The exact heading text that must appear in the draft.
+</code></pre>
+<p><code>SKILL.star</code> contains the workflow:</p>
+<pre><code class="language-python">def run(input):
+    task = input[&quot;task&quot;]
+    heading = input[&quot;heading&quot;]
+
+    for i in range(3):
+        result = ask(task, {
+            &quot;purpose&quot;: &quot;draft&quot;,
+            &quot;max_turns&quot;: 4,
+        })
+
+        if heading in result[&quot;answer&quot;]:
+            return {
+                &quot;status&quot;: &quot;accepted&quot;,
+                &quot;answer&quot;: result[&quot;answer&quot;],
+                &quot;attempts&quot;: i + 1,
+            }
+
+        trace(&quot;missing-heading&quot;, {
+            &quot;attempt&quot;: i + 1,
+            &quot;heading&quot;: heading,
+        })
+
+        task = (
+            &quot;Revise the draft so it includes this exact heading:\n&quot; +
+            heading +
+            &quot;\n\nPrevious draft:\n&quot; +
+            result[&quot;answer&quot;]
+        )
+
+    return {
+        &quot;status&quot;: &quot;exhausted&quot;,
+        &quot;answer&quot;: result[&quot;answer&quot;],
+        &quot;warning&quot;: &quot;The required heading was still missing.&quot;,
+    }
+</code></pre>
+<p>The author writes a normal, small program. The host supplies <code>ask</code>, <code>command</code>,
+and <code>trace</code>. The program does not get raw filesystem, process, network, or
+environment access.</p>
+<h2 id="3-package-format">3. Package Format</h2>
+<p>A metaskill is still a skill. It MUST live in a directory containing <code>SKILL.md</code>.
+The dynamic workflow is a program file in the same directory. The conventional
+program filename is <code>SKILL.star</code>.</p>
+<pre><code class="language-text">skills/
+  test-fix/
+    SKILL.md
+    SKILL.star
+</code></pre>
+<p><code>SKILL.md</code> is the single source of metadata. It MUST start with YAML
+frontmatter.</p>
+<p>Required fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Stable skill identifier.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>Short catalog description used by users and routing models.</td>
+</tr>
+</tbody>
+</table>
+<p>Optional fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metaskill</code></td>
+<td>string</td>
+<td>Relative path from the skill directory to the program file. Defaults to <code>SKILL.star</code> when that file exists.</td>
+</tr>
+<tr>
+<td><code>metaskill_language</code></td>
+<td>string</td>
+<td>Program language identifier. This version of the specification defines <code>starlark</code>. Defaults to <code>starlark</code> when a metaskill file is present.</td>
+</tr>
+</tbody>
+</table>
+<p>Name rules:</p>
+<ul>
+<li><code>name</code> MUST be lowercase ASCII alphanumeric with hyphens.</li>
+<li><code>name</code> MUST NOT contain leading hyphens, trailing hyphens, or consecutive
+  hyphens.</li>
+<li><code>name</code> MUST match the skill directory name.</li>
+<li><code>name</code> SHOULD NOT exceed 64 characters.</li>
+</ul>
+<p>Description rules:</p>
+<ul>
+<li><code>description</code> MUST be non-empty after Markdown comments are removed.</li>
+<li><code>description</code> SHOULD NOT exceed 1,024 characters.</li>
+<li><code>description</code> SHOULD explain when to use the skill.</li>
+<li>The Markdown body SHOULD NOT exceed 20,000 characters; hosts MAY truncate
+  longer bodies during activation.</li>
+</ul>
+<p>Input documentation:</p>
+<ul>
+<li>The <code>SKILL.md</code> body SHOULD document the expected <code>input</code> keys so that models
+  and users know what to pass to <code>run_metaskill</code>.</li>
+<li>A simple "Input keys:" list with key names and descriptions is sufficient.</li>
+<li>If a host receives an empty <code>input</code>, it SHOULD return the skill instructions
+  in the error message so the caller can learn the expected keys.</li>
+</ul>
+<p>Program file rules:</p>
+<ul>
+<li><code>metaskill</code> MUST be a relative path.</li>
+<li>The resolved program path MUST stay inside the skill directory.</li>
+<li>The program file MUST be UTF-8 text.</li>
+<li>The program file SHOULD NOT exceed 64 KiB.</li>
+<li>The program file MUST NOT contain its own frontmatter.</li>
+</ul>
+<p>Hosts MUST ignore unknown metadata fields unless they intentionally implement an
+extension. Extension fields SHOULD be prefixed, for example
+<code>x_myhost_feature</code>.</p>
+<h2 id="4-discovery">4. Discovery</h2>
+<p>Skill search locations are host-defined. A portable metaskill package MUST NOT
+depend on a specific installation directory.</p>
+<p>A conforming host discovers metaskills by:</p>
+<ol>
+<li>Finding skill directories that contain <code>SKILL.md</code>.</li>
+<li>Parsing and validating <code>name</code> and <code>description</code>.</li>
+<li>Resolving <code>metaskill</code>, or defaulting to <code>SKILL.star</code> when it exists.</li>
+<li>Rejecting metaskill paths that escape the skill directory.</li>
+<li>Rejecting unsupported <code>metaskill_language</code> values for execution.</li>
+<li>Marking executable metaskills in the skill catalog.</li>
+</ol>
+<p>If multiple discovered skills have the same <code>name</code>, the host MUST choose a
+deterministic winner according to documented precedence rules.</p>
+<p>Catalog entries SHOULD stay compact:</p>
+<pre><code class="language-text">- test-fix: Run tests and ask the agent to fix failures. (metaskill: starlark)
+</code></pre>
+<h2 id="5-activation-and-execution">5. Activation And Execution</h2>
+<p>Activation and execution are separate.</p>
+<p>Activation loads <code>SKILL.md</code> instructions into context. It should not execute
+code.</p>
+<p>Execution runs the metaskill program. It can spend nested model calls, run
+allowed commands, and cause side effects through the host. A host SHOULD expose
+execution through an operation named <code>run_metaskill</code>.</p>
+<p>If a host supports skill mentions such as <code>$test-fix</code>, those mentions SHOULD
+activate the skill instructions. They SHOULD NOT automatically execute the
+metaskill unless the user clearly asked for that behavior or the host has a
+separate documented policy.</p>
+<h2 id="6-runtime-language">6. Runtime Language</h2>
+<p>This specification defines <a href="https://starlark-lang.org">Starlark</a>, a safe subset of Python, as the portable metaskill language.</p>
+<p>A metaskill program MUST define:</p>
+<pre><code class="language-python">def run(input):
+    return &quot;done&quot;
+</code></pre>
+<p>The host calls <code>run(input)</code> exactly once per execution. <code>input</code> is a JSON-like
+dictionary supplied by the caller. It SHOULD contain only strings, numbers,
+booleans, null values, lists, and dictionaries.</p>
+<p>The Starlark environment MUST be hermetic by default:</p>
+<ul>
+<li>No filesystem access.</li>
+<li>No network access.</li>
+<li>No environment access.</li>
+<li>No process spawning.</li>
+<li>No unrestricted imports or module loading.</li>
+<li>No host-specific objects except the host API functions defined below.</li>
+</ul>
+<p>Hosts MAY support additional languages in the future by adding new
+<code>metaskill_language</code> values. A metaskill that wants to be portable across hosts SHOULD use <code>starlark</code>.</p>
+<h2 id="7-host-api">7. Host API</h2>
+<p>A metaskill exposes three global functions to the program:</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ask(prompt, opts={})</code></td>
+<td>Run a bounded nested agent turn.</td>
+</tr>
+<tr>
+<td><code>command(argv, opts={})</code></td>
+<td>Run an argv-style command through host policy.</td>
+</tr>
+<tr>
+<td><code>trace(kind, data={})</code></td>
+<td>Append structured trace data.</td>
+</tr>
+</tbody>
+</table>
+<p>Portable metaskills MUST use these global functions. A host MAY also expose an
+equivalent namespaced object such as <code>agent.ask</code>, but that is an extension and
+MUST NOT be required by portable metaskills.</p>
+<h3 id="askprompt-opts"><code>ask(prompt, opts={})</code></h3>
+<p><code>ask</code> asks the host agent to do one nested piece of work. It uses the host's
+normal model, tools, sandbox, cancellation, and reporting behavior.</p>
+<p>Parameters:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prompt</code></td>
+<td>string</td>
+<td>Prompt for the nested agent turn.</td>
+</tr>
+<tr>
+<td><code>opts.purpose</code></td>
+<td>string</td>
+<td>Optional label for traces and reports.</td>
+</tr>
+<tr>
+<td><code>opts.max_turns</code></td>
+<td>integer</td>
+<td>Optional nested turn cap. Hosts MUST clamp this to a documented maximum.</td>
+</tr>
+</tbody>
+</table>
+<p>Return value:</p>
+<pre><code class="language-json">{
+  &quot;answer&quot;: &quot;text returned by the nested agent&quot;,
+  &quot;exhausted&quot;: false,
+  &quot;turns&quot;: 6,
+  &quot;truncated&quot;: false
+}
+</code></pre>
+<p><code>answer</code> MUST be a string. <code>exhausted</code> SHOULD indicate whether the nested turn
+hit a host limit. <code>turns</code> SHOULD be the number of turns used when known; hosts
+MAY report the granted cap when exact usage is unavailable. <code>truncated</code> MUST be
+true when <code>answer</code> was shortened before returning to the metaskill.</p>
+<h3 id="commandargv-opts"><code>command(argv, opts={})</code></h3>
+<p><code>command</code> runs a command through the host's normal command policy. It MUST NOT
+bypass allowlists, approvals, middleware, sandbox roots, lifecycle hooks, or
+reporting. Shell strings are not part of the portable API.</p>
+<p>Parameters:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>argv</code></td>
+<td>list of strings</td>
+<td>Command and arguments. MUST be non-empty.</td>
+</tr>
+<tr>
+<td><code>opts.timeout</code></td>
+<td>integer</td>
+<td>Optional timeout in seconds. Hosts MUST clamp this to a documented maximum.</td>
+</tr>
+</tbody>
+</table>
+<p>Return value:</p>
+<pre><code class="language-json">{
+  &quot;ok&quot;: true,
+  &quot;exit_code&quot;: 0,
+  &quot;result&quot;: &quot;stdout and stderr or host error text&quot;,
+  &quot;truncated&quot;: false
+}
+</code></pre>
+<p><code>ok</code> MUST be true only when the command was allowed, started, did not time out,
+and exited successfully. <code>exit_code</code> SHOULD be the process exit code when known.
+<code>result</code> MUST be a string. Host-level failures SHOULD use an <code>error:</code> prefix in
+<code>result</code>. <code>truncated</code> MUST be true when <code>result</code> was shortened before returning
+to the metaskill.</p>
+<h3 id="tracekind-data"><code>trace(kind, data={})</code></h3>
+<p><code>trace</code> records what happened. Use it for small facts that help a user or
+implementer understand the run later.</p>
+<p>Parameters:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>string</td>
+<td>Short event label.</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>dictionary</td>
+<td>Optional JSON-like event data.</td>
+</tr>
+</tbody>
+</table>
+<p>Trace calls MUST NOT consume ask or command budgets. Hosts MUST cap the number
+and size of trace entries.</p>
+<h2 id="8-budgets-and-limits">8. Budgets And Limits</h2>
+<p>A conforming host MUST enforce finite budgets. Recommended defaults:</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nested <code>ask</code> calls</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>command</code> calls</td>
+<td>10</td>
+</tr>
+<tr>
+<td>Wall-clock execution timeout</td>
+<td>300 seconds</td>
+</tr>
+<tr>
+<td>Trace entries</td>
+<td>100</td>
+</tr>
+<tr>
+<td>Characters per nested answer</td>
+<td>20,000</td>
+</tr>
+<tr>
+<td>Characters per command result</td>
+<td>20,000</td>
+</tr>
+<tr>
+<td>Characters in final result string</td>
+<td>20,000</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>run_metaskill</code> operation MAY allow callers to set <code>max_ask_calls</code> and
+<code>max_command_calls</code> within host-defined bounds. Hosts SHOULD check cancellation
+and timeout before every host API call. Hosts SHOULD also interrupt or isolate
+pure script computation so large loops cannot evade wall-clock limits.</p>
+<h2 id="9-result-contract">9. Result Contract</h2>
+<p>Metaskill execution returns a string at the host tool boundary.</p>
+<p>On success, the string SHOULD contain a short completion header followed by one
+JSON object:</p>
+<pre><code class="language-text">[Metaskill: test-fix completed]
+{&quot;status&quot;:&quot;accepted&quot;,&quot;answer&quot;:&quot;Tests pass.&quot;,&quot;trace&quot;:[...]}
+</code></pre>
+<p>The JSON object is the result envelope. The top-level <code>answer</code> is the primary
+text a calling model should use. Other fields are structured metadata.</p>
+<p><code>run(input)</code> return values are normalized by the host:</p>
+<table>
+<thead>
+<tr>
+<th>Script return value</th>
+<th>Normalized envelope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>None</code></td>
+<td><code>{"status":"ok","answer":""}</code></td>
+</tr>
+<tr>
+<td>string</td>
+<td><code>{"status":"ok","answer":&lt;string&gt;}</code></td>
+</tr>
+<tr>
+<td>dictionary</td>
+<td>The dictionary, with missing <code>status</code> defaulted to <code>ok</code> and missing <code>answer</code> defaulted to an empty string.</td>
+</tr>
+</tbody>
+</table>
+<p>Any other return type MUST fail with an <code>error:</code> result.</p>
+<p>On failure, the host MUST return a string beginning with <code>error:</code>. Failures
+include unknown metaskill name, static skill passed to <code>run_metaskill</code>,
+disallowed external metaskill, unavailable runtime, unreadable program file,
+syntax errors, runtime errors, exhausted budgets, timeout, cancellation, and
+invalid return values.</p>
+<p>When the success envelope exceeds the host's result limit, the host SHOULD
+truncate trace first and answer last. Truncation MUST be explicit in the JSON,
+for example with <code>answer_truncated: true</code> or a trace entry whose kind is
+<code>truncated</code>.</p>
+<h2 id="10-standard-tool-schema">10. Standard Tool Schema</h2>
+<p>Hosts that expose tools to a model SHOULD expose metaskill execution with this
+JSON-schema-shaped function:</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;run_metaskill&quot;,
+  &quot;description&quot;: &quot;Run a dynamic skill workflow by name.&quot;,
+  &quot;parameters&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;name&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;description&quot;: &quot;The metaskill name to execute.&quot;
+      },
+      &quot;input&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;description&quot;: &quot;Input data passed to the metaskill program.&quot;
+      },
+      &quot;max_ask_calls&quot;: {
+        &quot;type&quot;: &quot;integer&quot;,
+        &quot;minimum&quot;: 1,
+        &quot;description&quot;: &quot;Maximum nested model calls.&quot;
+      },
+      &quot;max_command_calls&quot;: {
+        &quot;type&quot;: &quot;integer&quot;,
+        &quot;minimum&quot;: 0,
+        &quot;description&quot;: &quot;Maximum command calls.&quot;
+      }
+    },
+    &quot;required&quot;: [&quot;name&quot;, &quot;input&quot;]
+  }
+}
+</code></pre>
+<p>When the host knows the executable metaskill names, it SHOULD add an <code>enum</code> to
+the <code>name</code> property.</p>
+<p>If the caller passes an empty or missing <code>input</code>, the host SHOULD return a
+helpful error that includes the skill instructions so the caller can learn the
+expected keys and retry without an additional round trip.</p>
+<h2 id="11-practical-examples">11. Practical Examples</h2>
+<h3 id="run-tests-and-ask-for-fixes">Run Tests And Ask For Fixes</h3>
+<p>This metaskill runs a test command. If the command fails, it asks the host agent
+to fix the failure, then tries again.</p>
+<pre><code class="language-python">def run(input):
+    test_command = input.get(&quot;test_command&quot;, [&quot;pytest&quot;, &quot;-q&quot;])
+
+    for i in range(3):
+        result = command(test_command, {&quot;timeout&quot;: 120})
+
+        trace(&quot;test-run&quot;, {
+            &quot;attempt&quot;: i + 1,
+            &quot;ok&quot;: result[&quot;ok&quot;],
+        })
+
+        if result[&quot;ok&quot;]:
+            return {
+                &quot;status&quot;: &quot;accepted&quot;,
+                &quot;answer&quot;: &quot;Tests passed.&quot;,
+                &quot;attempts&quot;: i + 1,
+            }
+
+        ask(
+            &quot;The tests failed. Fix the problem, then stop.\n\n&quot; +
+            result[&quot;result&quot;],
+            {
+                &quot;purpose&quot;: &quot;fix-tests&quot;,
+                &quot;max_turns&quot;: 10,
+            },
+        )
+
+    return {
+        &quot;status&quot;: &quot;exhausted&quot;,
+        &quot;answer&quot;: result[&quot;result&quot;],
+        &quot;warning&quot;: &quot;Tests still failed after 3 attempts.&quot;,
+    }
+</code></pre>
+<p>Example input:</p>
+<pre><code class="language-json">{
+  &quot;test_command&quot;: [&quot;pytest&quot;, &quot;tests/test_parser.py&quot;, &quot;-q&quot;]
+}
+</code></pre>
+<h3 id="require-a-checklist">Require A Checklist</h3>
+<p>This metaskill asks for a short checklist and retries until all required words
+appear.</p>
+<pre><code class="language-python">def run(input):
+    task = input[&quot;task&quot;]
+    required = input.get(&quot;required&quot;, [&quot;install&quot;, &quot;test&quot;, &quot;rollback&quot;])
+
+    for i in range(3):
+        result = ask(task, {
+            &quot;purpose&quot;: &quot;draft-checklist&quot;,
+            &quot;max_turns&quot;: 4,
+        })
+
+        missing = []
+        for word in required:
+            if word not in result[&quot;answer&quot;].lower():
+                missing.append(word)
+
+        if not missing:
+            return {
+                &quot;status&quot;: &quot;accepted&quot;,
+                &quot;answer&quot;: result[&quot;answer&quot;],
+                &quot;attempts&quot;: i + 1,
+            }
+
+        trace(&quot;missing-words&quot;, {
+            &quot;attempt&quot;: i + 1,
+            &quot;missing&quot;: missing,
+        })
+
+        task = (
+            &quot;Revise the checklist. It must include these words: &quot; +
+            &quot;, &quot;.join(missing) +
+            &quot;\n\nPrevious checklist:\n&quot; +
+            result[&quot;answer&quot;]
+        )
+
+    return {
+        &quot;status&quot;: &quot;exhausted&quot;,
+        &quot;answer&quot;: result[&quot;answer&quot;],
+        &quot;missing&quot;: missing,
+    }
+</code></pre>
+<p>Example input:</p>
+<pre><code class="language-json">{
+  &quot;task&quot;: &quot;Write a deployment checklist for a small web app.&quot;,
+  &quot;required&quot;: [&quot;install&quot;, &quot;test&quot;, &quot;rollback&quot;]
+}
+</code></pre>
+<h3 id="review-a-diff-once">Review A Diff Once</h3>
+<p>This metaskill keeps the workflow simple: get a diff through host policy, ask
+for a focused review, and return the answer.</p>
+<pre><code class="language-python">def run(input):
+    diff = command([&quot;git&quot;, &quot;diff&quot;], {&quot;timeout&quot;: 30})
+
+    if not diff[&quot;ok&quot;]:
+        return {
+            &quot;status&quot;: &quot;error&quot;,
+            &quot;answer&quot;: diff[&quot;result&quot;],
+        }
+
+    review = ask(
+        &quot;Review this diff for bugs only. Ignore style nits.\n\n&quot; +
+        diff[&quot;result&quot;],
+        {
+            &quot;purpose&quot;: &quot;bug-review&quot;,
+            &quot;max_turns&quot;: 6,
+        },
+    )
+
+    return {
+        &quot;status&quot;: &quot;ok&quot;,
+        &quot;answer&quot;: review[&quot;answer&quot;],
+    }
+</code></pre>
+<h2 id="12-security-model">12. Security Model</h2>
+<p>Metaskills are code, so they need an explicit trust model.</p>
+<p>Default policy:</p>
+<ul>
+<li>Local metaskills MAY be executable by default when skills are enabled.</li>
+<li>External or global metaskills SHOULD require an explicit trust opt-in before
+  execution.</li>
+<li>Static activation of external skills MAY remain available without enabling
+  external metaskill execution.</li>
+<li>Direct script access to files, processes, environment variables, network,
+  clocks, randomness, and imports MUST be unavailable unless a host documents a
+  non-portable extension.</li>
+<li>All side effects MUST go through <code>ask</code> or <code>command</code>.</li>
+</ul>
+<p>Prompt-injection posture:</p>
+<ul>
+<li><code>input</code>, nested model answers, command output, and external tool output MUST
+  be treated as untrusted data.</li>
+<li>Metaskill authors SHOULD validate outputs using deterministic checks whenever
+  possible.</li>
+<li>Hosts SHOULD preserve normal untrusted-content labeling and reporting for
+  nested tool results.</li>
+</ul>
+<p>Sandbox posture:</p>
+<ul>
+<li><code>command</code> MUST run under the same command policy and filesystem sandbox as
+  normal host command tools.</li>
+<li>A metaskill MUST NOT expand the host's file, command, network, or tool access.</li>
+<li>Hosts SHOULD defensively copy or freeze <code>input</code>, host API return values, and
+  trace data before exposing them to the script.</li>
+</ul>
+<h2 id="13-agent-behavior-guidelines">13. Agent Behavior Guidelines</h2>
+<p>An AI agent using a metaskill-capable host SHOULD:</p>
+<ul>
+<li>When a metaskill applies to the user's request, call <code>run_metaskill</code> directly
+  with the appropriate <code>input</code> keys. The skill's SKILL.md body documents
+  what keys the program expects.</li>
+<li>If the agent does not know what input keys a metaskill needs, it MAY call
+  <code>use_skill</code> first to read the instructions, then call <code>run_metaskill</code>.</li>
+<li>Pass a small JSON-like <code>input</code> object containing the user's task, relevant
+  constraints, and any explicit limits.</li>
+<li>Avoid budget overrides unless the task clearly needs them.</li>
+<li>Treat the returned <code>answer</code> field as primary and use <code>trace</code> as supporting
+  evidence.</li>
+<li>Report <code>error:</code> results directly or use them to choose a fallback plan.</li>
+</ul>
+<h2 id="14-conformance-checklist">14. Conformance Checklist</h2>
+<p>A metaskills implementation conforms when it:</p>
+<ul>
+<li>Discovers skill directories through <code>SKILL.md</code>.</li>
+<li>Parses <code>name</code>, <code>description</code>, <code>metaskill</code>, and <code>metaskill_language</code>.</li>
+<li>Supports <code>metaskill_language: starlark</code>.</li>
+<li>Resolves metaskill paths safely under the skill directory.</li>
+<li>Keeps static activation separate from dynamic execution.</li>
+<li>Exposes or otherwise implements <code>run_metaskill</code>.</li>
+<li>Calls Starlark <code>run(input)</code> with the global functions <code>ask</code>, <code>command</code>, and
+  <code>trace</code>.</li>
+<li>Enforces finite ask, command, timeout, trace, and result budgets.</li>
+<li>Runs commands only through normal host policy.</li>
+<li>Returns successful executions as a string containing a JSON envelope.</li>
+<li>Returns failures as strings beginning with <code>error:</code>.</li>
+<li>Documents its discovery locations, trust policy for external metaskills, and
+  any non-portable extensions.</li>
+</ul>
+        </article>
+    </div>
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <div class="footer-grid">
+                <div class="footer-col">
+                    <img src="../img/logo.png" alt="Swival" class="footer-logo">
+                    <p class="footer-tagline">A coding agent for any model.<br>Free, open-source, and easy to set up.</p>
+                </div>
+                <div class="footer-col">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="getting-started.html">Getting Started</a></li>
+                        <li><a href="usage.html">Usage</a></li>
+                        <li><a href="tools.html">Tools</a></li>
+                        <li><a href="context-management.html">Context Management</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Guides</h4>
+                    <ul>
+                        <li><a href="providers.html">Providers</a></li>
+                        <li><a href="safety-and-sandboxing.html">Safety &amp; Sandboxing</a></li>
+                        <li><a href="python-api.html">Python API</a></li>
+                        <li><a href="open-models.html">Open Models</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/swival/swival">GitHub</a></li>
+                        <li><a href="https://calibra.swival.dev">Calibra</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 Swival &middot; MIT License</p>
+            </div>
+        </div>
+    </footer>
+    <button class="back-to-top" aria-label="Back to top">&uarr;</button>
+    <script src="../js/site.js"></script>
+</body>
+</html>

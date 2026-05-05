@@ -110,6 +110,7 @@ CONFIG_KEYS: dict[str, type | tuple[type, ...]] = {
     "approved_buckets": list,
     "oneshot_commands": bool,
     "trace_dir": str,
+    "metaskills": str,
 }
 
 _LIST_OF_STR_KEYS = {
@@ -206,6 +207,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "approved_buckets": [],
     "oneshot_commands": False,
     "trace_dir": None,
+    "metaskills": "local",
 }
 
 
@@ -1107,6 +1109,14 @@ def args_to_session_kwargs(args, base_dir: str) -> dict:
         kwargs["subagents"] = True
     elif _no_sa is True:
         kwargs["subagents"] = False
+
+    # metaskills policy: --no-metaskills or --metaskills=<policy>
+    _no_ms = getattr(args, "no_metaskills", _UNSET)
+    _ms_policy = getattr(args, "metaskills", _UNSET)
+    if _no_ms is not _UNSET and _no_ms:
+        kwargs["metaskills"] = "off"
+    elif _ms_policy is not _UNSET and _ms_policy is not None:
+        kwargs["metaskills"] = _ms_policy
 
     # skills_dir uses None as sentinel for "not set"
     skills_dir = getattr(args, "skills_dir", None)

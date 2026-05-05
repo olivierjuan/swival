@@ -10,6 +10,9 @@ from . import config, fmt
 MAX_SKILL_BODY_CHARS = 20_000
 MAX_SKILL_DESCRIPTION_CHARS = 1024
 MAX_SKILL_NAME_CHARS = 64
+MAX_METASKILL_FILE_BYTES = 65_536
+
+_KNOWN_METASKILL_LANGUAGES = {"starlark"}
 
 _NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -26,6 +29,8 @@ class SkillInfo:
     description: str  # description from frontmatter
     path: Path  # resolved absolute path to skill directory
     is_local: bool  # True if under base_dir (no allowlist entry needed)
+    metaskill_path: Path | None = None  # resolved path to metaskill program file
+    metaskill_language: str | None = None  # language identifier (e.g. "starlark")
 
 
 def validate_skill_name(name: str, dir_name: str) -> str | None:
@@ -98,7 +103,7 @@ def parse_frontmatter(text: str) -> dict | str:
         key = line[:colon_idx].strip()
         raw_value = line[colon_idx + 1 :].strip()
 
-        if key not in ("name", "description"):
+        if key not in ("name", "description", "metaskill", "metaskill_language"):
             # Unknown key — skip it and any continuation lines
             i += 1
             while i < len(fm_lines) and fm_lines[i] and fm_lines[i][0] in (" ", "\t"):
@@ -231,11 +236,56 @@ def _try_load_skill(
     resolved_path = entry.resolve()
     skill_is_local = resolved_path.is_relative_to(base_resolved)
 
+    # Resolve metaskill program file
+    metaskill_path: Path | None = None
+    metaskill_language: str | None = None
+    metaskill_field = parsed.get("metaskill")
+    if metaskill_field:
+        ms_path = resolved_path / metaskill_field
+        if not ms_path.resolve().is_relative_to(resolved_path):
+            if verbose:
+                fmt.warning(
+                    f"skill {name!r}: metaskill path escapes skill directory, skipping metaskill"
+                )
+        elif not ms_path.is_file():
+            if verbose:
+                fmt.warning(
+                    f"skill {name!r}: metaskill file {metaskill_field!r} not found"
+                )
+        else:
+            metaskill_path = ms_path.resolve()
+    elif (resolved_path / "SKILL.star").is_file():
+        metaskill_path = (resolved_path / "SKILL.star").resolve()
+
+    if metaskill_path is not None:
+        lang = parsed.get("metaskill_language", "starlark")
+        if lang not in _KNOWN_METASKILL_LANGUAGES:
+            if verbose:
+                fmt.warning(
+                    f"skill {name!r}: unknown metaskill language {lang!r}, skipping metaskill"
+                )
+            metaskill_path = None
+        else:
+            try:
+                size = metaskill_path.stat().st_size
+                if size > MAX_METASKILL_FILE_BYTES:
+                    if verbose:
+                        fmt.warning(
+                            f"skill {name!r}: metaskill file exceeds {MAX_METASKILL_FILE_BYTES} bytes"
+                        )
+                    metaskill_path = None
+                else:
+                    metaskill_language = lang
+            except OSError:
+                metaskill_path = None
+
     catalog[name] = SkillInfo(
         name=name,
         description=description,
         path=resolved_path,
         is_local=skill_is_local,
+        metaskill_path=metaskill_path,
+        metaskill_language=metaskill_language,
     )
 
 
@@ -420,6 +470,14 @@ def activate_skill(
         parts.append(f"\n[truncated at {MAX_SKILL_BODY_CHARS} characters]")
     parts.append("</skill-instructions>")
     parts.append("")
+    if skill.metaskill_path:
+        parts.append(
+            f"IMPORTANT: This is an executable metaskill. Do NOT follow the instructions "
+            f"above manually. Instead, call the `run_metaskill` tool with "
+            f'name="{name}" and an `input` object containing the task and constraints. '
+            f"The metaskill program handles retries, validation, and tracing automatically."
+        )
+        parts.append("")
     parts.append(f"Skill directory: {skill.path}")
 
     # List supporting files so the LLM knows what references are available
@@ -455,13 +513,17 @@ def format_skill_catalog(catalog: dict[str, SkillInfo]) -> str:
     ]
     for name in sorted(catalog):
         skill = catalog[name]
+        meta_tag = ""
+        if skill.metaskill_path:
+            meta_tag = f" (metaskill: {skill.metaskill_language})"
         if skill.is_local:
             path_str = str(skill.path / "SKILL.md")
-            lines.append(f"- {name}: {skill.description} (file: {path_str})")
+            lines.append(f"- {name}: {skill.description}{meta_tag} (file: {path_str})")
         else:
-            lines.append(f"- {name}: {skill.description}")
+            lines.append(f"- {name}: {skill.description}{meta_tag}")
     lines.append("")
     lines.append("### How to use skills")
+    has_metaskills = any(s.metaskill_path for s in catalog.values())
     lines.append(
         "- Call the `use_skill` tool with the skill name to activate it and receive "
         "detailed instructions.\n"
@@ -472,6 +534,15 @@ def format_skill_catalog(catalog: dict[str, SkillInfo]) -> str:
         "- If the user mentions a skill with `$skill-name`, it is activated automatically.\n"
         "- If multiple skills apply, activate the minimal set that covers the request."
     )
+    if has_metaskills:
+        lines.append(
+            "\n### Metaskills\n"
+            "Skills marked `(metaskill: starlark)` have an executable workflow program. "
+            "When a metaskill applies, you MUST call `run_metaskill` — do not attempt "
+            "the task manually. The metaskill program handles retries, validation, and "
+            "tracing automatically. Pass the user's task and any constraints as the "
+            '`input` object (e.g. `{"task": "...", "heading": "..."}`).'
+        )
     return "\n".join(lines)
 
 

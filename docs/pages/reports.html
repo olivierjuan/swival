@@ -74,6 +74,7 @@
 <li><a href="llm-filter.html">Outbound LLM Filter</a></li>
 <li><a href="command-middleware.html">Command Middleware</a></li>
 <li><a href="skills.html">Skills</a></li>
+<li><a href="metaskills.html">Metaskills</a></li>
 <li><a href="web-browsing.html">Web Browsing</a></li>
 <li><a href="mcp.html">MCP</a></li>
 <li><a href="a2a.html">A2A</a></li>
@@ -182,6 +183,7 @@
 <p>For <code>untrusted_input</code>, fields include <code>source</code> (the tool name, e.g. <code>fetch_url</code> or <code>mcp__server__tool</code>) and <code>origin</code> (the URL or empty string). These events are emitted when external content is successfully ingested.</p>
 <p>For <code>repl_turn</code>, fields include <code>turn_offset</code> (the cumulative turn count at the start of this REPL turn) and <code>input</code> (the user's input text, truncated to 500 characters). These events appear only in REPL reports and mark the boundary between user interactions.</p>
 <p>For <code>session_clear</code>, the event marks that a <code>/clear</code> or <code>/new</code> command reset the conversation state. No additional fields. These events appear only in REPL reports.</p>
+<p>For Agent MetaSKILL events: <code>metaskill_start</code> includes <code>name</code> and <code>language</code>. <code>metaskill_step</code> includes <code>operation</code> (<code>ask</code> or <code>command</code>), <code>purpose</code> or <code>argv</code>, <code>duration_s</code>, and <code>success</code>. <code>metaskill_finish</code> includes <code>name</code>, <code>status</code>, and <code>duration_s</code>. <code>metaskill_error</code> includes <code>name</code> and <code>error</code>. These events appear when <code>run_metaskill</code> is called.</p>
 <h2 id="benchmarking-workflow">Benchmarking Workflow</h2>
 <p>A standard pattern is to run the same task set against multiple models or settings and then compare their report files. Passing <code>--seed</code> can reduce run-to-run variance for providers that support seeded sampling.</p>
 <pre><code class="language-sh">swival &quot;task&quot; --seed 42 --report run1.json

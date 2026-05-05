@@ -109,6 +109,7 @@ class Session:
         command_middleware: str | None = None,
         aws_profile: str | None = None,
         approved_buckets: set[str] | None = None,
+        metaskills: str = "local",
     ):
         self.base_dir = base_dir
         self.scratch_dir = scratch_dir
@@ -176,6 +177,7 @@ class Session:
         self.command_middleware = command_middleware
         self.aws_profile = aws_profile
         self.approved_buckets = approved_buckets
+        self.metaskills = metaskills
 
         # Streaming / cancellation hooks (set externally, e.g. by A2A server).
         # event_callback receives (kind, data) where kind is one of the
@@ -326,6 +328,16 @@ class Session:
                 if not skill.is_local and skill.path not in self._allowed_dir_ro_paths:
                     self._allowed_dir_ro_paths.append(skill.path)
 
+        # Resolve metaskills
+        self._metaskills_policy = self.metaskills if self.metaskills != "off" else "off"
+        self._metaskill_names: list[str] = []
+        if not self.no_skills and self._metaskills_policy != "off":
+            from .metaskills import get_executable_metaskills
+
+            self._metaskill_names = get_executable_metaskills(
+                self._skills_catalog, self._metaskills_policy
+            )
+
         # Build tools
         self._tools = build_tools(
             self._resolved_commands,
@@ -333,6 +345,7 @@ class Session:
             commands_unrestricted=self._commands_unrestricted,
             shell_allowed=self._shell_allowed,
             subagents=self.subagents,
+            metaskill_names=self._metaskill_names,
         )
 
         # Initialize MCP servers
@@ -526,6 +539,7 @@ class Session:
             continue_here=self.continue_here,
             cache=self._llm_cache,
             command_policy=self._command_policy,
+            metaskills_policy=self._metaskills_policy,
         )
         if state.get("compaction_state") is not None:
             kwargs["compaction_state"] = state["compaction_state"]
