@@ -82,3 +82,11 @@ The catalog includes guidance telling the model that if a task clearly matches a
 ## File Access For External Skills
 
 Project-local skills are already inside normal sandbox roots, so they use standard file access rules. External skills (including global skills) are automatically added as read-only roots at session setup time. That means the model can read helper files under those skill directories with absolute paths, but cannot write into those external skill directories.
+
+## Agent MetaSKILLs
+
+A skill directory can also contain a program file (`SKILL.star`) that turns it into an Agent MetaSKILL — a dynamic workflow that runs bounded loops with nested model calls, command execution, and structured tracing. When a `SKILL.star` file is present (or the `metaskill` frontmatter field points to one), Swival exposes the `run_metaskill` tool alongside `use_skill`.
+
+MetaSKILLs use Starlark as their runtime language and expose three host functions: `ask()`, `command()`, and `trace()`. Local metaskills execute by default; external metaskills require `--metaskills all` or `metaskills = "all"` in config.
+
+See the [Agent MetaSKILLs specification](metaskills.md) for the full format, host API, budgets, and authoring guide.

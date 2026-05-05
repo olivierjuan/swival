@@ -49,6 +49,7 @@ Session(
     no_instructions: bool = False,
     no_skills: bool = False,
     skills_dir: list[str] | None = None,
+    metaskills: str = "local",  # "local", "all", or "off"
     allowed_dirs: list[str] | None = None,
     allowed_dirs_ro: list[str] | None = None,
     sandbox: str = "builtin",

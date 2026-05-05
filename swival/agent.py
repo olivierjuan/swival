@@ -2402,6 +2402,8 @@ def handle_tool_call(
     command_middleware=None,
     is_subagent=False,
     report=None,
+    metaskill_loop_kwargs=None,
+    cancel_flag=None,
 ):
     """Execute a single tool call and return (tool_msg, metadata).
 
@@ -2470,6 +2472,8 @@ def handle_tool_call(
             command_middleware=command_middleware,
             is_subagent=is_subagent,
             report=report,
+            metaskill_loop_kwargs=metaskill_loop_kwargs,
+            cancel_flag=cancel_flag,
         )
     except McpShutdownError:
         result = "error: MCP server is shutting down"
@@ -2806,7 +2810,7 @@ def _filter_command_tool_schemas(tools):
         t
         for t in tools
         if t.get("function", {}).get("name", "").startswith(("mcp__", "a2a__"))
-        or t.get("function", {}).get("name") == "use_skill"
+        or t.get("function", {}).get("name") in ("use_skill", "run_metaskill")
     ]
 
 
@@ -4099,6 +4103,18 @@ def build_parser():
         default=_UNSET,
         help="Don't load or discover any skills.",
     )
+    prompt_group.add_argument(
+        "--no-metaskills",
+        action="store_true",
+        default=_UNSET,
+        help="Disable metaskill execution (skills still discoverable as static).",
+    )
+    prompt_group.add_argument(
+        "--metaskills",
+        type=str,
+        default=_UNSET,
+        help="Metaskill execution policy: local (default), all, or off.",
+    )
     review_group.add_argument(
         "--objective",
         type=str,
@@ -5298,6 +5314,7 @@ def build_tools(
     subagents: bool = False,
     *,
     goal_tools: bool = False,
+    metaskill_names: list[str] | None = None,
 ) -> list:
     """Construct the tools list from base + conditionals.
 
@@ -5330,6 +5347,14 @@ def build_tools(
                 f"Use this instead of searching for SKILL.md files."
             )
         tools.append(skill_tool)
+    if metaskill_names:
+        from .tools import RUN_METASKILL_TOOL
+
+        ms_tool = copy.deepcopy(RUN_METASKILL_TOOL)
+        ms_tool["function"]["parameters"]["properties"]["name"]["enum"] = (
+            metaskill_names
+        )
+        tools.append(ms_tool)
     if commands_unrestricted:
         tool = copy.deepcopy(RUN_COMMAND_TOOL)
         if shell_allowed:
@@ -5873,12 +5898,26 @@ def _run_main(args, report, _write_report, parser):
         _subagents = args.provider in ("google", "chatgpt", "bedrock") or (
             context_length is not None and context_length >= 100_000
         )
+    # Resolve metaskill names for tool exposure
+    _ms_arg = getattr(args, "metaskills", _UNSET)
+    _metaskills_policy_val = _ms_arg if _ms_arg is not _UNSET and _ms_arg else "local"
+    if getattr(args, "no_metaskills", _UNSET) is True:
+        _metaskills_policy_val = "off"
+    _metaskill_names: list[str] = []
+    if not args.no_skills and _metaskills_policy_val != "off":
+        from .metaskills import get_executable_metaskills
+
+        _metaskill_names = get_executable_metaskills(
+            skills_catalog, _metaskills_policy_val
+        )
+
     tools = build_tools(
         resolved_commands,
         skills_catalog,
         commands_unrestricted=commands_unrestricted,
         shell_allowed=shell_allowed,
         subagents=_subagents,
+        metaskill_names=_metaskill_names,
     )
 
     # Initialize MCP servers
@@ -6068,6 +6107,7 @@ def _run_main(args, report, _write_report, parser):
         cache=llm_cache,
         secret_shield=secret_shield,
         command_policy=command_policy,
+        metaskills_policy=_metaskills_policy_val,
     )
 
     # Validate and thread llm_filter
@@ -6488,6 +6528,7 @@ def run_agent_loop(
     command_middleware=None,
     is_subagent: bool = False,
     goal_launch_turn: bool = False,
+    metaskills_policy: str = "local",
 ) -> tuple[str | None, bool]:
     """Run the tool-calling loop until a final answer or max turns.
 
@@ -6543,6 +6584,33 @@ def run_agent_loop(
     _vision_pending = False
     _provider_retries = 0
     loop_start = time.monotonic()
+
+    _metaskill_loop_kwargs = {
+        "api_base": api_base,
+        "model_id": model_id,
+        "max_output_tokens": max_output_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "seed": seed,
+        "context_length": context_length,
+        "base_dir": base_dir,
+        "scratch_dir": scratch_dir,
+        "resolved_commands": resolved_commands,
+        "skills_catalog": skills_catalog,
+        "skill_read_roots": skill_read_roots,
+        "extra_write_roots": extra_write_roots,
+        "files_mode": files_mode,
+        "commands_unrestricted": commands_unrestricted,
+        "shell_allowed": shell_allowed,
+        "verbose": verbose,
+        "llm_kwargs": llm_kwargs,
+        "file_tracker": file_tracker,
+        "report": report,
+        "command_policy": command_policy,
+        "command_middleware": command_middleware,
+        "tools": tools,
+        "metaskills_policy": metaskills_policy,
+    }
 
     # Goal-loop bookkeeping. last_turn_was_goal_continuation tracks whether the
     # current turn was driven by an automatic continuation prompt; this matters
@@ -6640,6 +6708,8 @@ def run_agent_loop(
             command_middleware=command_middleware,
             is_subagent=is_subagent,
             report=report,
+            metaskill_loop_kwargs=_metaskill_loop_kwargs,
+            cancel_flag=cancel_flag,
         )
         llm_kwargs = {
             **llm_kwargs,
@@ -7457,6 +7527,8 @@ def run_agent_loop(
                 command_middleware=command_middleware,
                 is_subagent=is_subagent,
                 report=report,
+                metaskill_loop_kwargs=_metaskill_loop_kwargs,
+                cancel_flag=cancel_flag,
             )
             messages.append(tool_msg)
 
@@ -9214,6 +9286,7 @@ def repl_loop(
     turn_offset: int = 0,
     on_exit=None,
     trace_dir: str | None = None,
+    metaskills_policy: str = "local",
 ):
     """Interactive read-eval-print loop."""
     from prompt_toolkit import PromptSession
@@ -9295,6 +9368,7 @@ def repl_loop(
         turn_state=turn_state,
         report=report,
         turn_offset=turn_offset,
+        metaskills_policy=metaskills_policy,
     )
 
     ctx = InputContext(
