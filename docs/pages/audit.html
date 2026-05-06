@@ -99,7 +99,7 @@
             <h1 id="swival-security-scanner">Swival Security Scanner</h1>
 <p>The <code>/audit</code> command runs a multi-phase security audit over committed Git-tracked code.</p>
 <p>It triages files by attack surface, performs deep review on escalated files, verifies each finding with an isolated proof-of-concept agent, generates patches, and writes structured reports. Only provable bugs survive to the final output.</p>
-<pre><code class="language-text">/audit [path|glob ...] [--resume] [--regen] [--all] [--measure-triage] [--workers N] [--debug]
+<pre><code class="language-text">/audit [path|glob ...] [--resume] [--regen] [--finding N[,M-R]] [--all] [--measure-triage] [--workers N] [--patch-max-turns N] [--debug]
 </code></pre>
 <p>Works in both interactive (REPL) and one-shot mode (requires <code>--oneshot-commands</code>). Runs against <code>HEAD</code>, so dirty working-directory changes are ignored.</p>
 <h2 id="quick-start">Quick Start</h2>
@@ -119,7 +119,7 @@ state file and one set of reports:</p>
 Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/` to review.
 </code></pre>
 <p>If no bugs are found:</p>
-<pre><code class="language-text">No provable logic or security bugs found in Git-tracked files.
+<pre><code class="language-text">No provable security bugs or security-control failures found in Git-tracked files.
 </code></pre>
 <h2 id="example-audits">Example Audits</h2>
 <p>A growing collection of security audits run against open-source projects with Swival is published at <a href="https://github.com/swival/security-audits">github.com/swival/security-audits</a>. Each audit there was generated automatically by <code>/audit</code> and contains the full set of findings, reports, and patches.</p>
@@ -173,6 +173,7 @@ Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/
   002-missing-null-check-in-parser.md
   002-missing-null-check-in-parser.patch
 </code></pre>
+<p>Each verified finding is assigned a stable index when it is first reached, and that index sticks across retries: if patch generation runs out of turns, the next attempt writes <code>002-...</code> for the same finding rather than consuming a new number. Patch failures, report exceptions, and write errors are all persisted as retryable Phase 5 state, so an audit that finishes Phase 4 but stumbles in Phase 5 stays resumable. See <a href="#options">Options</a> for <code>--patch-max-turns</code> and the targeted <code>--regen --finding</code> form.</p>
 <h2 id="report-format">Report Format</h2>
 <p>Each <code>.md</code> report follows a fixed structure:</p>
 <pre><code class="language-text"># &lt;finding title&gt;
@@ -192,11 +193,14 @@ Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/
 <pre><code class="language-sh">git apply audit-findings/001-command-injection-in-handler.patch
 </code></pre>
 <h2 id="options">Options</h2>
-<p><code>--resume</code> resumes a previous audit run from its last checkpoint. The resume matches against the current commit and scope (focus argument). If the commit or scope changed since the original run, no match is found and the command returns an error. On resume, completed phases are skipped, and failed verifications are requeued.</p>
+<p>Saved audit state from versions before Phase 5 artifact retry is not supported after this state-model change. Finish in-flight audits before upgrading, or re-run <code>/audit</code> from scratch.</p>
+<p><code>--resume</code> resumes a previous audit run from its last checkpoint. The resume matches against the current commit and scope (focus argument). If the commit or scope changed since the original run, no match is found and the command returns an error. On resume, completed phases are skipped, failed verifications are requeued, and failed Phase 5 artifact generation is retried.</p>
 <pre><code class="language-text">swival&gt; /audit --resume
 </code></pre>
-<p><code>--regen</code> regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases.</p>
+<p><code>--regen</code> regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases. Use <code>--finding</code> with 1-based Phase 5 finding numbers to regenerate only selected artifacts.</p>
 <pre><code class="language-text">swival&gt; /audit --regen
+swival&gt; /audit --regen --finding 2 --patch-max-turns 75
+swival&gt; /audit --regen --finding 2,4-6
 </code></pre>
 <p><code>--all</code> skips the Phase 2 triage selection and sends every file in scope straight to deep review. Useful when you have already narrowed scope to a subtree you want exhaustively reviewed and do not want the triage step deciding which files are worth a closer look.</p>
 <pre><code class="language-text">swival&gt; /audit --all swival/
@@ -208,6 +212,12 @@ Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/
 </code></pre>
 <p><code>--workers N</code> sets the number of parallel workers for triage and verification (default: 4). Verification is always capped at 2 regardless of this value.</p>
 <pre><code class="language-text">swival&gt; /audit --workers 8
+</code></pre>
+<p><code>--patch-max-turns N</code> sets the isolated Phase 5 patch-generation turn budget (default: 50). The CLI flag overrides <code>[audit].patch_max_turns</code> in <code>swival.toml</code>; project config overrides global config. Raising this value can rescue complex patches, but it also increases LLM spend for stubborn findings.</p>
+<pre><code class="language-text">swival&gt; /audit --resume --patch-max-turns 75
+</code></pre>
+<pre><code class="language-toml">[audit]
+patch_max_turns = 50
 </code></pre>
 <p><code>--debug</code> writes a real-time JSONL trace of every audit step to <code>.swival/audit/debug.jsonl</code>. Useful when investigating a stuck phase, a missing finding, or unexpected resume behavior.</p>
 <pre><code class="language-text">swival&gt; /audit --debug
@@ -240,7 +250,7 @@ force_review = [&quot;swival/audit.py&quot;, &quot;swival/edit.py&quot;, &quot;s
 <li>Verification status for each finding (pending, running, verified, discarded, failed)</li>
 <li>Metrics (parse failures, repair successes, analytical retries)</li>
 <li>Per-file attack-surface scores cached from Phase 1</li>
-<li>Current phase and next artifact index</li>
+<li>Current phase and per-finding artifact state (status, stable index, filenames, attempts, last error code, last patch budget used)</li>
 <li><code>select_all</code> flag (whether the run was started with <code>--all</code>) and <code>measure_triage</code> flag (whether the run was started with <code>--measure-triage</code>)</li>
 </ul>
 <p>LLM interactions are traced to <code>.swival/audit/&lt;run_id&gt;/traces/</code> when <code>--trace-dir</code> is set on the outer session.</p>
@@ -249,7 +259,10 @@ force_review = [&quot;swival/audit.py&quot;, &quot;swival/edit.py&quot;, &quot;s
 <h2 id="interruption-and-recovery">Interruption and Recovery</h2>
 <p>The audit is designed to be interrupted and resumed. <code>Ctrl+C</code> during any phase stops the audit gracefully. State is always saved before the interrupt is handled, so <code>/audit --resume</code> picks up where it left off.</p>
 <p>If verification produces partial results (some findings verified, some failed), the audit reports the incomplete state and asks you to resume:</p>
-<pre><code class="language-text">Audit incomplete: 2 findings not verified (1 failed). Use /audit --resume to continue.
+<pre><code class="language-text">Audit incomplete: 2 findings not verified after 3 attempts (1 failed). Use /audit --resume to retry.
+</code></pre>
+<p>If Phase 5 patch or report generation fails for some verified findings, the run stays in the <code>"artifacts"</code> phase with per-finding status recorded:</p>
+<pre><code class="language-text">Audit incomplete: artifact generation has 1 failed and 0 pending out of 10 verified finding(s). Use /audit --resume --patch-max-turns 75 to retry incomplete artifacts, or /audit --regen --finding 1 --patch-max-turns 75 to retry a specific finding.
 </code></pre>
 <p>A completed audit (phase <code>"done"</code>) is not resumable with <code>--resume</code>, but can be used with <code>--regen</code> to regenerate artifacts.</p>
 <h2 id="limitations">Limitations</h2>

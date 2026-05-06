@@ -29,6 +29,7 @@ _AUDIT_TRUNCATION_MARKER = "\n\n[truncated — file too large for context window
 _AUDIT_TRUNCATION_FLOOR = 200
 
 _LARGE_SCOPE_THRESHOLD = 500
+_DEFAULT_PATCH_MAX_TURNS = 50
 
 _DEFAULT_METRICS: dict[str, int] = {
     "parse_failures": 0,
@@ -229,6 +230,13 @@ class VerificationResult:
 
 
 @dataclass
+class PatchGenerationResult:
+    patch_text: str | None = None
+    error_code: str | None = None
+    error: str | None = None
+
+
+@dataclass
 class AuditRunState:
     run_id: str
     scope: AuditScope
@@ -250,7 +258,7 @@ class AuditRunState:
     artifact_dir: Path = field(default_factory=lambda: Path("audit-findings"))
     state_dir: Path = field(default_factory=lambda: Path(".swival/audit"))
     verification_state: dict[str, dict] = field(default_factory=dict)
-    next_index: int = 1
+    artifact_state: dict[str, dict] = field(default_factory=dict)
     phase: str = "init"
     metrics: dict[str, int] = field(default_factory=lambda: dict(_DEFAULT_METRICS))
     select_all: bool = False
@@ -297,7 +305,7 @@ class AuditRunState:
             "caller_index": self.caller_index,
             "attack_scores": self.attack_scores,
             "verification_state": self.verification_state,
-            "next_index": self.next_index,
+            "artifact_state": self.artifact_state,
             "phase": self.phase,
             "metrics": self.metrics,
             "select_all": self.select_all,
@@ -328,6 +336,12 @@ class AuditRunState:
                     reproducer=vf.get("reproducer"),
                 )
             )
+        if "artifact_state" not in blob:
+            raise ValueError(
+                f"audit state file at {state_dir / run_id / 'state.json'} predates "
+                "the artifact_state field. Re-run /audit from scratch."
+            )
+
         state = cls(
             run_id=blob["run_id"],
             scope=scope,
@@ -343,8 +357,8 @@ class AuditRunState:
             caller_index=blob.get("caller_index", {}),
             attack_scores=blob.get("attack_scores", {}),
             verification_state=blob.get("verification_state", {}),
+            artifact_state=blob["artifact_state"],
             state_dir=state_dir,
-            next_index=blob.get("next_index", 1),
             phase=blob.get("phase", "init"),
             metrics=blob.get("metrics", dict(_DEFAULT_METRICS)),
             select_all=bool(blob.get("select_all", False)),
@@ -388,8 +402,13 @@ class AuditRunState:
                 continue
             mtime = sf.stat().st_mtime
             if mtime > best_mtime:
+                try:
+                    candidate = cls.load(state_dir, blob["run_id"])
+                except ValueError as e:
+                    fmt.warning(str(e))
+                    continue
                 best_mtime = mtime
-                best = cls.load(state_dir, blob["run_id"])
+                best = candidate
         return best
 
 
@@ -2650,7 +2669,8 @@ def _phase5_patch(
     vf: VerifiedFinding,
     ctx: InputContext,
     state: AuditRunState,
-) -> str | None:
+    patch_max_turns: int = _DEFAULT_PATCH_MAX_TURNS,
+) -> PatchGenerationResult:
     """Generate a patch by running an agent loop in a worktree, then capturing git diff."""
     from .agent import run_agent_loop
 
@@ -2663,7 +2683,9 @@ def _phase5_patch(
         wt.__enter__()
     except RuntimeError as e:
         fmt.info(f"    patch: worktree failed: {e}")
-        return None
+        return PatchGenerationResult(
+            error_code="patch_worktree_error", error=f"worktree failed: {e}"
+        )
 
     try:
         prompt = (
@@ -2680,7 +2702,7 @@ def _phase5_patch(
             {"role": "user", "content": prompt},
         ]
 
-        kw = _make_isolated_loop_kwargs(ctx, work_dir, max_turns=25)
+        kw = _make_isolated_loop_kwargs(ctx, work_dir, max_turns=patch_max_turns)
 
         # Pre-seed the file tracker so the agent can edit without a read_file
         # round-trip — the committed source is already in the prompt.
@@ -2694,7 +2716,9 @@ def _phase5_patch(
             _answer, exhausted = run_agent_loop(messages, ctx.tools, **kw)
         except Exception as e:
             fmt.info(f"    patch: agent loop failed: {e}")
-            return None
+            return PatchGenerationResult(
+                error_code="patch_agent_error", error=f"agent loop failed: {e}"
+            )
         finally:
             _write_audit_trace(
                 ctx, messages, task=f"audit: phase 5 patch {vf.finding.title}"
@@ -2702,7 +2726,10 @@ def _phase5_patch(
 
         if exhausted:
             fmt.info("    patch: turn budget exhausted, discarding incomplete work")
-            return None
+            return PatchGenerationResult(
+                error_code="patch_turn_budget_exhausted",
+                error="turn budget exhausted",
+            )
 
         diff = subprocess.run(
             ["git", "diff"],
@@ -2713,8 +2740,10 @@ def _phase5_patch(
         patch_text = diff.stdout.decode(errors="replace").strip()
         if not patch_text:
             fmt.info("    patch: no changes produced")
-            return None
-        return patch_text + "\n"
+            return PatchGenerationResult(
+                error_code="patch_no_diff", error="no changes produced"
+            )
+        return PatchGenerationResult(patch_text=patch_text + "\n")
     finally:
         wt.__exit__(None, None, None)
 
@@ -2909,25 +2938,145 @@ def _make_slug(title: str) -> str:
     return slug[:60] if slug else "finding"
 
 
+def _artifact_key(vf: VerifiedFinding) -> str:
+    return _finding_key(vf.finding)
+
+
+def _artifact_filenames(index: int, finding: FindingRecord) -> tuple[str, str]:
+    slug = _make_slug(finding.title)
+    return f"{index:03d}-{slug}.patch", f"{index:03d}-{slug}.md"
+
+
+def _ensure_artifact_state(state: AuditRunState) -> None:
+    """Ensure each verified finding has a stable artifact entry."""
+    current: dict[str, VerifiedFinding] = {
+        _artifact_key(vf): vf for vf in state.verified_findings
+    }
+    for key in list(state.artifact_state):
+        if key not in current:
+            del state.artifact_state[key]
+
+    for key, vf in current.items():
+        if key in state.artifact_state:
+            continue
+        next_idx = (
+            max(
+                (int(entry["index"]) for entry in state.artifact_state.values()),
+                default=0,
+            )
+            + 1
+        )
+        patch_filename, report_filename = _artifact_filenames(next_idx, vf.finding)
+        state.artifact_state[key] = {
+            "status": "pending",
+            "index": next_idx,
+            "patch_filename": patch_filename,
+            "report_filename": report_filename,
+            "attempts": 0,
+            "last_error_code": None,
+            "last_error": None,
+            "last_patch_max_turns": None,
+        }
+
+
+def _parse_finding_selector(raw: str, total: int) -> set[int]:
+    """Parse a 1-based finding selector into zero-based indexes."""
+    selected: set[int] = set()
+    if raw.strip() == "":
+        raise ValueError("--finding requires a non-empty selector")
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            raise ValueError("--finding contains an empty selector")
+        if "-" in part:
+            pieces = part.split("-", 1)
+            if not pieces[0] or not pieces[1]:
+                raise ValueError(f"invalid --finding range {part!r}")
+            try:
+                start = int(pieces[0])
+                end = int(pieces[1])
+            except ValueError as e:
+                raise ValueError(f"invalid --finding range {part!r}") from e
+            if start > end:
+                raise ValueError(f"invalid --finding range {part!r}")
+            nums = range(start, end + 1)
+        else:
+            try:
+                nums = (int(part),)
+            except ValueError as e:
+                raise ValueError(f"invalid --finding selector {part!r}") from e
+        for n in nums:
+            if n < 1 or n > total:
+                raise ValueError(
+                    f"--finding index {n} out of range; valid range is 1..{total}"
+                )
+            selected.add(n - 1)
+    if not selected:
+        raise ValueError("--finding did not select any findings")
+    return selected
+
+
+def _reset_artifact_targets_for_regen(
+    state: AuditRunState, selected_indexes: set[int] | None
+) -> None:
+    _ensure_artifact_state(state)
+    selected_keys = {
+        _artifact_key(vf)
+        for i, vf in enumerate(state.verified_findings)
+        if selected_indexes is None or i in selected_indexes
+    }
+    for key in selected_keys:
+        entry = state.artifact_state[key]
+        entry["status"] = "pending"
+        entry["last_error_code"] = None
+        entry["last_error"] = None
+
+
+def _artifact_summary(state: AuditRunState) -> tuple[int, int, int]:
+    entries = [
+        state.artifact_state[_artifact_key(vf)] for vf in state.verified_findings
+    ]
+    failed = sum(1 for e in entries if e.get("status") == "failed")
+    pending = sum(1 for e in entries if e.get("status") == "pending")
+    written = sum(1 for e in entries if e.get("status") == "written")
+    return failed, pending, written
+
+
+def _mark_artifact_failed(
+    entry: dict,
+    state: AuditRunState,
+    fi: int,
+    total: int,
+    error_code: str,
+    error_msg: str,
+) -> None:
+    entry["status"] = "failed"
+    entry["last_error_code"] = error_code
+    entry["last_error"] = error_msg
+    state.save()
+    fmt.info(f"  [{fi}/{total}] failed ({error_msg})")
+
+
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
 
-def _load_force_review(base_dir: str) -> tuple[list[str], dict[str, str]]:
-    """Load merged ``[audit] force_review`` from global+project config.
+def _load_audit_config(
+    base_dir: str,
+) -> tuple[list[str], dict[str, str], int | None]:
+    """Load merged ``[audit]`` settings from global+project config.
 
-    Returns ``(globs, sources)`` where ``sources[glob]`` is ``"global"`` or
-    ``"project"``. Returns empty values if no config or the section is
-    missing. Errors loading config are non-fatal here: the rest of swival
-    has already validated the file at startup, so any failure to re-parse
-    is reported as a warning and treated as "no force-review."
+    Returns ``(force_review_globs, sources, patch_max_turns)``. Errors loading
+    config are non-fatal here: the rest of swival has already validated the file
+    at startup, so failures are reported as warnings and treated as defaults.
     """
     try:
         from .config import (
             _load_single,
             global_config_dir,
             merge_audit_force_review,
+            merge_audit_patch_max_turns,
         )
 
         global_path = global_config_dir() / "config.toml"
@@ -2935,9 +3084,11 @@ def _load_force_review(base_dir: str) -> tuple[list[str], dict[str, str]]:
         global_audit = _load_single(global_path, str(global_path)).get("audit")
         project_audit = _load_single(project_path, str(project_path)).get("audit")
     except Exception as e:
-        fmt.warning(f"audit: ignoring swival.toml force_review (load failed: {e})")
-        return [], {}
-    return merge_audit_force_review(global_audit, project_audit)
+        fmt.warning(f"audit: ignoring swival.toml audit config (load failed: {e})")
+        return [], {}, None
+    globs, sources = merge_audit_force_review(global_audit, project_audit)
+    patch_max_turns = merge_audit_patch_max_turns(global_audit, project_audit)
+    return globs, sources, patch_max_turns
 
 
 def _resolve_force_review(
@@ -2980,6 +3131,8 @@ def run_audit_command(cmd_arg: str, ctx: InputContext) -> str:
     debug = False
     select_all = False
     measure_triage = False
+    patch_max_turns_cli: int | None = None
+    finding_selector: str | None = None
     focus: list[str] | None = None
 
     parts = arg.split()
@@ -2996,17 +3149,37 @@ def run_audit_command(cmd_arg: str, ctx: InputContext) -> str:
             select_all = True
         elif parts[i] == "--measure-triage":
             measure_triage = True
-        elif parts[i] == "--workers" and i + 1 < len(parts):
+        elif parts[i] == "--workers":
+            if i + 1 >= len(parts):
+                return "error: --workers requires an integer"
             i += 1
             try:
                 workers = int(parts[i])
             except ValueError:
                 return f"error: --workers requires an integer, got {parts[i]!r}"
+        elif parts[i] == "--patch-max-turns":
+            if i + 1 >= len(parts):
+                return "error: --patch-max-turns requires an integer"
+            i += 1
+            try:
+                patch_max_turns_cli = int(parts[i])
+            except ValueError:
+                return f"error: --patch-max-turns requires an integer, got {parts[i]!r}"
+            if patch_max_turns_cli < 1:
+                return "error: --patch-max-turns must be at least 1"
+        elif parts[i] == "--finding":
+            if finding_selector is not None:
+                return "error: --finding may only be provided once; use --finding 2,5"
+            if i + 1 >= len(parts) or parts[i + 1].startswith("-"):
+                return "error: --finding requires a selector"
+            i += 1
+            finding_selector = parts[i]
         elif parts[i].startswith("-"):
             return (
                 f"error: unknown option {parts[i]!r}. "
                 f"Known flags: --resume, --regen, --debug, --all, "
-                f"--measure-triage, --workers N."
+                f"--measure-triage, --workers N, --patch-max-turns N, "
+                f"--finding N."
             )
         else:
             filtered.append(parts[i])
@@ -3014,7 +3187,17 @@ def run_audit_command(cmd_arg: str, ctx: InputContext) -> str:
     if filtered:
         focus = _normalize_focus(filtered)
 
-    force_review, force_review_sources = _load_force_review(base_dir)
+    if finding_selector is not None and not regen:
+        return "error: --finding requires --regen"
+
+    force_review, force_review_sources, config_patch_max_turns = _load_audit_config(
+        base_dir
+    )
+    patch_max_turns = (
+        patch_max_turns_cli
+        if patch_max_turns_cli is not None
+        else config_patch_max_turns or _DEFAULT_PATCH_MAX_TURNS
+    )
 
     if debug:
         log_dir = Path(base_dir) / ".swival" / "audit"
@@ -3041,6 +3224,8 @@ def run_audit_command(cmd_arg: str, ctx: InputContext) -> str:
             force_review=force_review,
             force_review_sources=force_review_sources,
             measure_triage=measure_triage,
+            patch_max_turns=patch_max_turns,
+            finding_selector=finding_selector,
         )
     finally:
         _debug_log_path = None
@@ -3060,9 +3245,12 @@ def _run_audit_phases(
     force_review: list[str] | None = None,
     force_review_sources: dict[str, str] | None = None,
     measure_triage: bool = False,
+    patch_max_turns: int = _DEFAULT_PATCH_MAX_TURNS,
+    finding_selector: str | None = None,
 ) -> str:
     force_review = list(force_review or [])
     force_review_sources = dict(force_review_sources or {})
+    selected_indexes: set[int] | None = None
     if resume or regen:
         try:
             commit = _git(["rev-parse", "HEAD"], base_dir)
@@ -3086,12 +3274,24 @@ def _run_audit_phases(
         if regen:
             if not state.verified_findings:
                 return "error: no verified findings to regenerate artifacts for."
+            if finding_selector is not None:
+                try:
+                    selected_indexes = _parse_finding_selector(
+                        finding_selector, len(state.verified_findings)
+                    )
+                except ValueError as e:
+                    return f"error: {e}"
             state.phase = "artifacts"
-            state.next_index = 1
+            _reset_artifact_targets_for_regen(state, selected_indexes)
             state.save()
+            label = (
+                f"{len(selected_indexes)} selected"
+                if selected_indexes is not None
+                else f"{len(state.verified_findings)} verified"
+            )
             fmt.info(
                 f"regenerating artifacts for audit run {state.run_id} "
-                f"({len(state.verified_findings)} verified findings)"
+                f"({label} findings)"
             )
         else:
             fmt.info(f"resuming audit run {state.run_id} from phase {state.phase}")
@@ -3507,37 +3707,77 @@ def _run_audit_phases(
         fmt.info(f"phase 4 complete. {len(state.verified_findings)} verified findings.")
 
     # Phase 5: artifacts
-    artifacts_written = 0
     if state.phase == "artifacts":
         if state.verified_findings:
             artifact_dir = Path(base_dir) / state.artifact_dir
             artifact_dir.mkdir(parents=True, exist_ok=True)
+            _ensure_artifact_state(state)
 
-            fmt.info(
-                f"phase 5: generating artifacts for {len(state.verified_findings)} findings..."
-            )
+            targets = []
             total = len(state.verified_findings)
             for fi, vf in enumerate(state.verified_findings, 1):
-                idx = state.next_index
-                slug = _make_slug(vf.finding.title)
-                patch_filename = f"{idx:03d}-{slug}.patch"
-                report_filename = f"{idx:03d}-{slug}.md"
+                key = _artifact_key(vf)
+                entry = state.artifact_state[key]
+                if selected_indexes is not None:
+                    if fi - 1 in selected_indexes:
+                        targets.append((fi, vf, key, entry))
+                elif entry.get("status") in ("pending", "failed"):
+                    targets.append((fi, vf, key, entry))
 
-                fmt.info(f"  [{fi}/{total}] generating patch: {vf.finding.title}")
-                patch_text = _phase5_patch(vf, ctx, state)
-                if patch_text is None:
-                    fmt.info(f"  [{fi}/{total}] skipped (no patch produced)")
-                    state.next_index += 1
+            if targets:
+                fmt.info(
+                    f"phase 5: generating artifacts for {len(targets)} "
+                    f"of {len(state.verified_findings)} findings..."
+                )
+
+            for target_i, (fi, vf, key, entry) in enumerate(targets, 1):
+                patch_filename = entry["patch_filename"]
+                report_filename = entry["report_filename"]
+                if selected_indexes is None:
+                    progress = f"[{fi}/{total}] generating patch"
+                else:
+                    progress = (
+                        f"[{target_i}/{len(targets)}] regenerating finding {fi}/{total}"
+                    )
+
+                fmt.info(f"  {progress}: {vf.finding.title}")
+                patch_result = _phase5_patch(vf, ctx, state, patch_max_turns)
+                entry["attempts"] = int(entry.get("attempts", 0)) + 1
+                entry["last_patch_max_turns"] = patch_max_turns
+                if patch_result.patch_text is None:
+                    _mark_artifact_failed(
+                        entry,
+                        state,
+                        fi,
+                        total,
+                        patch_result.error_code or "patch_failed",
+                        patch_result.error or "patch generation failed",
+                    )
                     continue
 
                 fmt.info(f"  [{fi}/{total}] generating report...")
-                report_text = _phase5_report(vf, patch_filename, patch_text, ctx)
+                try:
+                    report_text = _phase5_report(
+                        vf, patch_filename, patch_result.patch_text, ctx
+                    )
+                except Exception as e:
+                    _mark_artifact_failed(
+                        entry, state, fi, total, "report_generation_error", str(e)
+                    )
+                    continue
 
-                (artifact_dir / patch_filename).write_text(patch_text)
-                (artifact_dir / report_filename).write_text(report_text)
-                artifacts_written += 1
+                try:
+                    (artifact_dir / patch_filename).write_text(patch_result.patch_text)
+                    (artifact_dir / report_filename).write_text(report_text)
+                except OSError as e:
+                    _mark_artifact_failed(
+                        entry, state, fi, total, "write_artifact_error", str(e)
+                    )
+                    continue
 
-                state.next_index += 1
+                entry["status"] = "written"
+                entry["last_error_code"] = None
+                entry["last_error"] = None
                 state.save()
                 fmt.info(f"  [{fi}/{total}] wrote {report_filename} + {patch_filename}")
 
@@ -3564,19 +3804,34 @@ def _run_audit_phases(
                 f"deep review. Use /audit --resume to continue."
             )
 
+        failed, pending, written = _artifact_summary(state)
+        if failed or pending:
+            state.phase = "artifacts"
+            state.save()
+            return (
+                "Audit incomplete: artifact generation has "
+                f"{failed} failed and {pending} pending out of "
+                f"{len(state.verified_findings)} verified finding(s). "
+                "Use /audit --resume --patch-max-turns 75 to retry incomplete "
+                "artifacts, or /audit --regen --finding 1 --patch-max-turns 75 "
+                "to retry a specific finding."
+            )
+
         if state.measure_triage:
             _emit_measure_triage_recall(state)
 
         state.phase = "done"
         state.save()
+    else:
+        _failed, _pending, written = _artifact_summary(state)
 
-    if artifacts_written == 0:
+    if written == 0:
         return (
             "No provable security bugs or security-control failures found "
             "in Git-tracked files."
         )
 
     return (
-        f"Audit complete. {artifacts_written} finding(s) written to {state.artifact_dir}/. "
+        f"Audit complete. {written} finding(s) written to {state.artifact_dir}/. "
         f"Run `ls {state.artifact_dir}/` to review."
     )

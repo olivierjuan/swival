@@ -5,7 +5,7 @@ The `/audit` command runs a multi-phase security audit over committed Git-tracke
 It triages files by attack surface, performs deep review on escalated files, verifies each finding with an isolated proof-of-concept agent, generates patches, and writes structured reports. Only provable bugs survive to the final output.
 
 ```text
-/audit [path|glob ...] [--resume] [--regen] [--all] [--measure-triage] [--workers N] [--debug]
+/audit [path|glob ...] [--resume] [--regen] [--finding N[,M-R]] [--all] [--measure-triage] [--workers N] [--patch-max-turns N] [--debug]
 ```
 
 Works in both interactive (REPL) and one-shot mode (requires `--oneshot-commands`). Runs against `HEAD`, so dirty working-directory changes are ignored.
@@ -42,7 +42,7 @@ Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/
 If no bugs are found:
 
 ```text
-No provable logic or security bugs found in Git-tracked files.
+No provable security bugs or security-control failures found in Git-tracked files.
 ```
 
 ## Example Audits
@@ -119,6 +119,8 @@ audit-findings/
   002-missing-null-check-in-parser.patch
 ```
 
+Each verified finding is assigned a stable index when it is first reached, and that index sticks across retries: if patch generation runs out of turns, the next attempt writes `002-...` for the same finding rather than consuming a new number. Patch failures, report exceptions, and write errors are all persisted as retryable Phase 5 state, so an audit that finishes Phase 4 but stumbles in Phase 5 stays resumable. See [Options](#options) for `--patch-max-turns` and the targeted `--regen --finding` form.
+
 ## Report Format
 
 Each `.md` report follows a fixed structure:
@@ -146,16 +148,21 @@ git apply audit-findings/001-command-injection-in-handler.patch
 
 ## Options
 
-`--resume` resumes a previous audit run from its last checkpoint. The resume matches against the current commit and scope (focus argument). If the commit or scope changed since the original run, no match is found and the command returns an error. On resume, completed phases are skipped, and failed verifications are requeued.
+Saved audit state from versions before Phase 5 artifact retry is not supported after this state-model change. Finish in-flight audits before upgrading, or re-run `/audit` from scratch.
+
+
+`--resume` resumes a previous audit run from its last checkpoint. The resume matches against the current commit and scope (focus argument). If the commit or scope changed since the original run, no match is found and the command returns an error. On resume, completed phases are skipped, failed verifications are requeued, and failed Phase 5 artifact generation is retried.
 
 ```text
 swival> /audit --resume
 ```
 
-`--regen` regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases.
+`--regen` regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases. Use `--finding` with 1-based Phase 5 finding numbers to regenerate only selected artifacts.
 
 ```text
 swival> /audit --regen
+swival> /audit --regen --finding 2 --patch-max-turns 75
+swival> /audit --regen --finding 2,4-6
 ```
 
 `--all` skips the Phase 2 triage selection and sends every file in scope straight to deep review. Useful when you have already narrowed scope to a subtree you want exhaustively reviewed and do not want the triage step deciding which files are worth a closer look.
@@ -178,6 +185,17 @@ swival> /audit --measure-triage swival/
 
 ```text
 swival> /audit --workers 8
+```
+
+`--patch-max-turns N` sets the isolated Phase 5 patch-generation turn budget (default: 50). The CLI flag overrides `[audit].patch_max_turns` in `swival.toml`; project config overrides global config. Raising this value can rescue complex patches, but it also increases LLM spend for stubborn findings.
+
+```text
+swival> /audit --resume --patch-max-turns 75
+```
+
+```toml
+[audit]
+patch_max_turns = 50
 ```
 
 `--debug` writes a real-time JSONL trace of every audit step to `.swival/audit/debug.jsonl`. Useful when investigating a stuck phase, a missing finding, or unexpected resume behavior.
@@ -232,7 +250,7 @@ Audit state is persisted in `.swival/audit/<run_id>/state.json`. This includes:
 - Verification status for each finding (pending, running, verified, discarded, failed)
 - Metrics (parse failures, repair successes, analytical retries)
 - Per-file attack-surface scores cached from Phase 1
-- Current phase and next artifact index
+- Current phase and per-finding artifact state (status, stable index, filenames, attempts, last error code, last patch budget used)
 - `select_all` flag (whether the run was started with `--all`) and `measure_triage` flag (whether the run was started with `--measure-triage`)
 
 LLM interactions are traced to `.swival/audit/<run_id>/traces/` when `--trace-dir` is set on the outer session.
@@ -248,7 +266,13 @@ The audit is designed to be interrupted and resumed. `Ctrl+C` during any phase s
 If verification produces partial results (some findings verified, some failed), the audit reports the incomplete state and asks you to resume:
 
 ```text
-Audit incomplete: 2 findings not verified (1 failed). Use /audit --resume to continue.
+Audit incomplete: 2 findings not verified after 3 attempts (1 failed). Use /audit --resume to retry.
+```
+
+If Phase 5 patch or report generation fails for some verified findings, the run stays in the `"artifacts"` phase with per-finding status recorded:
+
+```text
+Audit incomplete: artifact generation has 1 failed and 0 pending out of 10 verified finding(s). Use /audit --resume --patch-max-turns 75 to retry incomplete artifacts, or /audit --regen --finding 1 --patch-max-turns 75 to retry a specific finding.
 ```
 
 A completed audit (phase `"done"`) is not resumable with `--resume`, but can be used with `--regen` to regenerate artifacts.

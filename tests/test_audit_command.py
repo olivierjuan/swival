@@ -13,6 +13,7 @@ from swival.audit import (
     AuditScope,
     DeepReviewResult,
     FindingRecord,
+    PatchGenerationResult,
     PhaseSchema,
     RecordSchema,
     TriageRecord,
@@ -1900,7 +1901,6 @@ class TestStatePersistence:
                 )
             ],
             state_dir=tmp_path / ".swival" / "audit",
-            next_index=1,
             phase="verification",
         )
 
@@ -1918,6 +1918,8 @@ class TestStatePersistence:
         assert len(loaded.proposed_findings) == 1
         assert loaded.proposed_findings[0].title == "Command injection"
         assert loaded.phase == "verification"
+        state_path = state.state_dir / state.run_id / "state.json"
+        assert "next_index" not in state_path.read_text()
 
     def test_resume_matches_commit_and_focus(self, tmp_path):
         state = self._make_state(tmp_path)
@@ -1962,6 +1964,31 @@ class TestStatePersistence:
 
         found = AuditRunState.find_resumable(state.state_dir, "abc123", None)
         assert found is None
+
+    def test_find_resumable_skips_state_without_artifact_state(self, tmp_path):
+        import json
+
+        state_dir = tmp_path / ".swival" / "audit"
+        run_dir = state_dir / "legacy"
+        run_dir.mkdir(parents=True)
+        (run_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "run_id": "legacy",
+                    "scope": {
+                        "branch": "m",
+                        "commit": "c",
+                        "tracked_files": ["a.py"],
+                        "mandatory_files": ["a.py"],
+                        "focus": [],
+                    },
+                    "queued_files": ["a.py"],
+                    "phase": "triage",
+                }
+            )
+        )
+
+        assert AuditRunState.find_resumable(state_dir, "c", None) is None
 
     def test_incomplete_coverage_blocks_no_findings_message(self, tmp_path):
         scope = AuditScope(
@@ -2105,6 +2132,404 @@ class TestVerificationGates:
         for key, value in overrides.items():
             setattr(finding, key, value)
         return finding
+
+    def test_artifact_state_assigns_max_plus_one_after_prune(self, tmp_path):
+        from swival.audit import _ensure_artifact_state
+
+        state = self._make_state(tmp_path)
+        f1 = self._make_finding(title="A")
+        f2 = self._make_finding(title="B")
+        f3 = self._make_finding(title="C")
+        state.verified_findings = [
+            VerifiedFinding(finding=f1, correctness_reason="ok", rebuttal_reason="n/a"),
+            VerifiedFinding(finding=f2, correctness_reason="ok", rebuttal_reason="n/a"),
+        ]
+        _ensure_artifact_state(state)
+        key1 = _finding_key(f1)
+        state.artifact_state[key1]["index"] = 1
+        state.artifact_state[_finding_key(f2)]["index"] = 5
+        state.verified_findings = [
+            VerifiedFinding(finding=f2, correctness_reason="ok", rebuttal_reason="n/a"),
+            VerifiedFinding(finding=f3, correctness_reason="ok", rebuttal_reason="n/a"),
+        ]
+
+        _ensure_artifact_state(state)
+
+        assert key1 not in state.artifact_state
+        assert state.artifact_state[_finding_key(f3)]["index"] == 6
+
+    def test_artifact_state_preserves_filenames_on_retry(self, tmp_path):
+        from swival.audit import _ensure_artifact_state
+
+        state = self._make_state(tmp_path)
+        finding = self._make_finding(title="Original Title")
+        vf = VerifiedFinding(
+            finding=finding, correctness_reason="ok", rebuttal_reason="n/a"
+        )
+        state.verified_findings = [vf]
+        _ensure_artifact_state(state)
+        key = _finding_key(finding)
+        original_patch = state.artifact_state[key]["patch_filename"]
+        state.artifact_state[key]["status"] = "failed"
+
+        _ensure_artifact_state(state)
+
+        assert state.artifact_state[key]["patch_filename"] == original_patch
+
+    def _make_verified(self, **overrides) -> VerifiedFinding:
+        return VerifiedFinding(
+            finding=self._make_finding(**overrides),
+            correctness_reason="ok",
+            rebuttal_reason="n/a",
+        )
+
+    def _make_artifact_state(self, tmp_path, findings):
+        state = self._make_state(tmp_path)
+        state.phase = "artifacts"
+        state.reviewed_files = {"main.c"}
+        state.candidate_files = ["main.c"]
+        state.deep_reviewed_files = {"main.c"}
+        state.verified_findings = list(findings)
+        return state
+
+    def _ctx(self, tmp_path):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            base_dir=str(tmp_path),
+            tools=[],
+            verbose=False,
+            no_history=True,
+            loop_kwargs={},
+        )
+
+    def _phase5_state(self, tmp_path, findings):
+        _init_git(tmp_path)
+        _commit_file(tmp_path, "main.c", "int main(void) { return 0; }")
+        commit = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path)
+            .decode()
+            .strip()
+        )
+        state_dir = Path(tmp_path) / ".swival" / "audit"
+        state = self._make_artifact_state(tmp_path, findings)
+        state.scope = AuditScope(
+            branch=state.scope.branch,
+            commit=commit,
+            tracked_files=state.scope.tracked_files,
+            mandatory_files=state.scope.mandatory_files,
+            focus=state.scope.focus,
+        )
+        state.state_dir = state_dir
+        return state, state_dir
+
+    def test_phase5_patch_failure_marks_failed_and_stays_artifacts(
+        self, monkeypatch, tmp_path
+    ):
+        from swival.audit import _run_audit_phases
+
+        vf = self._make_verified()
+        state, state_dir = self._phase5_state(tmp_path, [vf])
+        state.save()
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                error_code="patch_turn_budget_exhausted", error="turn budget exhausted"
+            ),
+        )
+
+        result = _run_audit_phases(
+            "--resume",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            True,
+            False,
+            None,
+        )
+
+        loaded = AuditRunState.load(state_dir, state.run_id)
+        entry = loaded.artifact_state[_finding_key(vf.finding)]
+        assert "Audit incomplete" in result
+        assert "No provable" not in result
+        assert loaded.phase == "artifacts"
+        assert entry["status"] == "failed"
+        assert entry["last_error_code"] == "patch_turn_budget_exhausted"
+
+    def test_phase5_no_diff_is_retryable(self, monkeypatch, tmp_path):
+        from swival.audit import _run_audit_phases
+
+        vf = self._make_verified()
+        state, state_dir = self._phase5_state(tmp_path, [vf])
+        state.save()
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                error_code="patch_no_diff", error="no changes produced"
+            ),
+        )
+
+        _run_audit_phases(
+            "--resume",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            True,
+            False,
+            None,
+        )
+
+        loaded = AuditRunState.load(state_dir, state.run_id)
+        entry = loaded.artifact_state[_finding_key(vf.finding)]
+        assert loaded.phase == "artifacts"
+        assert entry["status"] == "failed"
+        assert entry["last_error_code"] == "patch_no_diff"
+
+    def test_phase5_report_exception_is_retryable(self, monkeypatch, tmp_path):
+        from swival.audit import _run_audit_phases
+
+        vf = self._make_verified()
+        state, state_dir = self._phase5_state(tmp_path, [vf])
+        state.save()
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                patch_text="diff\n"
+            ),
+        )
+        monkeypatch.setattr(
+            "swival.audit._phase5_report",
+            lambda vf, patch_fn, patch_text, ctx: (_ for _ in ()).throw(
+                RuntimeError("boom")
+            ),
+        )
+
+        _run_audit_phases(
+            "--resume",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            True,
+            False,
+            None,
+        )
+
+        loaded = AuditRunState.load(state_dir, state.run_id)
+        entry = loaded.artifact_state[_finding_key(vf.finding)]
+        assert loaded.phase == "artifacts"
+        assert entry["status"] == "failed"
+        assert entry["last_error_code"] == "report_generation_error"
+
+    def test_phase5_write_error_is_retryable(self, monkeypatch, tmp_path):
+        from swival.audit import _ensure_artifact_state, _run_audit_phases
+
+        vf = self._make_verified()
+        state, state_dir = self._phase5_state(tmp_path, [vf])
+        _ensure_artifact_state(state)
+        entry = state.artifact_state[_finding_key(vf.finding)]
+        entry["patch_filename"] = "existing-dir"
+        artifact_dir = Path(tmp_path) / state.artifact_dir
+        (artifact_dir / "existing-dir").mkdir(parents=True)
+        state.save()
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                patch_text="diff\n"
+            ),
+        )
+        monkeypatch.setattr(
+            "swival.audit._phase5_report",
+            lambda vf, patch_fn, patch_text, ctx: "# report",
+        )
+
+        _run_audit_phases(
+            "--resume",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            True,
+            False,
+            None,
+        )
+
+        loaded = AuditRunState.load(state_dir, state.run_id)
+        entry = loaded.artifact_state[_finding_key(vf.finding)]
+        assert entry["status"] == "failed"
+        assert entry["last_error_code"] == "write_artifact_error"
+
+    def test_resume_retries_only_failed_and_pending(self, monkeypatch, tmp_path):
+        from swival.audit import _ensure_artifact_state, _run_audit_phases
+
+        findings = [
+            self._make_verified(title="A"),
+            self._make_verified(title="B"),
+            self._make_verified(title="C"),
+        ]
+        state, state_dir = self._phase5_state(tmp_path, findings)
+        _ensure_artifact_state(state)
+        state.artifact_state[_finding_key(findings[0].finding)]["status"] = "written"
+        state.artifact_state[_finding_key(findings[1].finding)]["status"] = "failed"
+        state.artifact_state[_finding_key(findings[2].finding)]["status"] = "pending"
+        state.save()
+        patched = []
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: (
+                patched.append(vf.finding.title)
+                or PatchGenerationResult(patch_text="diff\n")
+            ),
+        )
+        monkeypatch.setattr(
+            "swival.audit._phase5_report",
+            lambda vf, patch_fn, patch_text, ctx: "# report",
+        )
+
+        _run_audit_phases(
+            "--resume",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            True,
+            False,
+            None,
+        )
+
+        assert patched == ["B", "C"]
+
+    def test_targeted_regen_only_selected_and_keeps_written(
+        self, monkeypatch, tmp_path
+    ):
+        from swival.audit import _ensure_artifact_state, _run_audit_phases
+
+        findings = [self._make_verified(title="A"), self._make_verified(title="B")]
+        state, state_dir = self._phase5_state(tmp_path, findings)
+        state.phase = "done"
+        _ensure_artifact_state(state)
+        state.artifact_state[_finding_key(findings[0].finding)]["status"] = "written"
+        state.artifact_state[_finding_key(findings[1].finding)]["status"] = "failed"
+        original_patch = state.artifact_state[_finding_key(findings[1].finding)][
+            "patch_filename"
+        ]
+        state.save()
+        patched = []
+        info_lines = []
+        monkeypatch.setattr("swival.audit.fmt.info", info_lines.append)
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: (
+                patched.append(vf.finding.title)
+                or PatchGenerationResult(patch_text="diff\n")
+            ),
+        )
+        monkeypatch.setattr(
+            "swival.audit._phase5_report",
+            lambda vf, patch_fn, patch_text, ctx: "# report",
+        )
+
+        _run_audit_phases(
+            "--regen --finding 2",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            False,
+            True,
+            None,
+            finding_selector="2",
+        )
+
+        loaded = AuditRunState.load(state_dir, state.run_id)
+        assert patched == ["B"]
+        assert (
+            loaded.artifact_state[_finding_key(findings[0].finding)]["status"]
+            == "written"
+        )
+        assert (
+            loaded.artifact_state[_finding_key(findings[1].finding)]["patch_filename"]
+            == original_patch
+        )
+        assert any("[1/1] regenerating finding 2/2" in line for line in info_lines)
+
+    def test_phase5_success_marks_done(self, monkeypatch, tmp_path):
+        from swival.audit import _run_audit_phases
+
+        vf = self._make_verified()
+        state, state_dir = self._phase5_state(tmp_path, [vf])
+        state.save()
+        monkeypatch.setattr(
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                patch_text="diff\n"
+            ),
+        )
+        monkeypatch.setattr(
+            "swival.audit._phase5_report",
+            lambda vf, patch_fn, patch_text, ctx: "# report",
+        )
+
+        result = _run_audit_phases(
+            "--resume",
+            self._ctx(tmp_path),
+            str(tmp_path),
+            state_dir,
+            1,
+            True,
+            False,
+            None,
+        )
+
+        loaded = AuditRunState.load(state_dir, state.run_id)
+        entry = loaded.artifact_state[_finding_key(vf.finding)]
+        assert "Audit complete" in result
+        assert loaded.phase == "done"
+        assert entry["status"] == "written"
+
+    def test_phase5_patch_budget_passed_to_isolated_loop(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+        import swival.agent as agent_mod
+        import swival.audit as audit_mod
+        from swival.audit import _phase5_patch
+
+        captured = {}
+
+        class FakeWorktree:
+            def __init__(self, base_dir, work_dir):
+                self.work_dir = work_dir
+
+            def __enter__(self):
+                return self.work_dir
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_kwargs(ctx, work_dir, max_turns=None):
+            captured["max_turns"] = max_turns
+            return {"base_dir": str(work_dir)}
+
+        class FakeDiff:
+            stdout = b"diff --git a/main.c b/main.c\n"
+
+        monkeypatch.setattr(audit_mod, "_worktree", FakeWorktree)
+        monkeypatch.setattr(
+            audit_mod, "_gather_evidence", lambda finding, ctx: ("source", 1)
+        )
+        monkeypatch.setattr(audit_mod, "_make_isolated_loop_kwargs", fake_kwargs)
+        monkeypatch.setattr(
+            agent_mod, "run_agent_loop", lambda messages, tools, **kw: ("done", False)
+        )
+        monkeypatch.setattr(audit_mod.subprocess, "run", lambda *a, **kw: FakeDiff())
+        ctx = SimpleNamespace(base_dir=str(tmp_path), tools=[], loop_kwargs={})
+        state = self._make_state(tmp_path)
+
+        result = _phase5_patch(self._make_verified(), ctx, state, patch_max_turns=75)
+
+        assert captured["max_turns"] == 75
+        assert result.patch_text is not None
 
     def test_no_reproduction_discards(self, monkeypatch, tmp_path):
         state = self._make_state(tmp_path)
@@ -3063,7 +3488,7 @@ class TestPhase4Parallelism:
         assert result.discarded
 
     def test_verified_findings_deduplicated_before_artifacts(self, tmp_path):
-        """Duplicate verified_findings from pre-migration state must not produce duplicate artifacts."""
+        """Duplicate verified_findings must not produce duplicate artifacts."""
         state = self._make_state(tmp_path)
         finding = self._make_finding()
         vf = VerifiedFinding(
@@ -3777,7 +4202,9 @@ class TestAutoRetry:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_patch",
-            lambda vf, ctx, state: "--- patch ---",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                patch_text="--- patch ---"
+            ),
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
@@ -4335,30 +4762,6 @@ class TestMultiFocusPaths:
         found = AuditRunState.find_resumable(state.state_dir, "abc123", [])
         assert found is not None
 
-    def test_find_resumable_matches_persisted_legacy_string_focus(self, tmp_path):
-        import json
-
-        state_dir = tmp_path / ".swival" / "audit"
-        run_dir = state_dir / "legacy-run"
-        run_dir.mkdir(parents=True)
-        blob = {
-            "run_id": "legacy-run",
-            "scope": {
-                "branch": "main",
-                "commit": "abc123",
-                "tracked_files": ["src/auth/x.py"],
-                "mandatory_files": ["src/auth/x.py"],
-                "focus": "src/auth",
-            },
-            "queued_files": ["src/auth/x.py"],
-            "phase": "triage",
-        }
-        (run_dir / "state.json").write_text(json.dumps(blob))
-
-        found = AuditRunState.find_resumable(state_dir, "abc123", ["src/auth"])
-        assert found is not None
-        assert found.scope.focus == ["src/auth"]
-
 
 class TestAuditCommandParser:
     """Parser-level tests: capture kwargs passed to _run_audit_phases."""
@@ -4414,6 +4817,54 @@ class TestAuditCommandParser:
         assert result.startswith("error:")
         assert "--bogus" in result
 
+    def test_patch_max_turns_parsed(self, monkeypatch, tmp_path):
+        from swival.audit import run_audit_command
+
+        captured = _capture_run_audit_phases(monkeypatch)
+        run_audit_command("--patch-max-turns 75", _make_ctx(tmp_path))
+        assert captured["patch_max_turns"] == 75
+
+    def test_patch_max_turns_rejects_bad_values(self, monkeypatch, tmp_path):
+        from swival.audit import run_audit_command
+
+        _capture_run_audit_phases(monkeypatch)
+        assert run_audit_command(
+            "--patch-max-turns nope", _make_ctx(tmp_path)
+        ).startswith("error:")
+        assert run_audit_command("--patch-max-turns 0", _make_ctx(tmp_path)).startswith(
+            "error:"
+        )
+
+    def test_finding_requires_regen(self, monkeypatch, tmp_path):
+        from swival.audit import run_audit_command
+
+        _capture_run_audit_phases(monkeypatch)
+        result = run_audit_command("--finding 2", _make_ctx(tmp_path))
+        assert result.startswith("error:")
+        assert "--regen" in result
+
+    def test_finding_rejects_repeated_flags(self, monkeypatch, tmp_path):
+        from swival.audit import run_audit_command
+
+        _capture_run_audit_phases(monkeypatch)
+        result = run_audit_command(
+            "--regen --finding 2 --finding 5", _make_ctx(tmp_path)
+        )
+        assert result.startswith("error:")
+        assert "only be provided once" in result
+
+    def test_finding_selector_parser_rejects_empty_and_zero(self):
+        from swival.audit import _parse_finding_selector
+
+        for raw in ("", ",,", "0"):
+            with pytest.raises(ValueError):
+                _parse_finding_selector(raw, total=3)
+
+    def test_finding_selector_parser_accepts_lists_and_ranges(self):
+        from swival.audit import _parse_finding_selector
+
+        assert _parse_finding_selector("2,4-5", total=5) == {1, 3, 4}
+
 
 class TestSelectAll:
     """Tests for the /audit --all flag (skip Phase 2 triage)."""
@@ -4440,29 +4891,6 @@ class TestSelectAll:
 
         loaded = AuditRunState.load(state.state_dir, "ra")
         assert loaded.select_all is True
-
-    def test_select_all_default_false_when_absent_from_legacy_state(self, tmp_path):
-        import json
-
-        state_dir = tmp_path / ".swival" / "audit"
-        run_dir = state_dir / "legacy"
-        run_dir.mkdir(parents=True)
-        blob = {
-            "run_id": "legacy",
-            "scope": {
-                "branch": "main",
-                "commit": "abc",
-                "tracked_files": ["a.py"],
-                "mandatory_files": ["a.py"],
-                "focus": [],
-            },
-            "queued_files": ["a.py"],
-            "phase": "triage",
-        }
-        (run_dir / "state.json").write_text(json.dumps(blob))
-
-        loaded = AuditRunState.load(state_dir, "legacy")
-        assert loaded.select_all is False
 
     # -- Parser plumbing -----------------------------------------------------
 
@@ -4510,7 +4938,10 @@ class TestSelectAll:
             ),
         )
         monkeypatch.setattr(
-            "swival.audit._phase5_patch", lambda vf, ctx, state: "--- patch ---"
+            "swival.audit._phase5_patch",
+            lambda vf, ctx, state, patch_max_turns=50: PatchGenerationResult(
+                patch_text="--- patch ---"
+            ),
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
@@ -4792,42 +5223,6 @@ class TestTriageRecordFields:
         assert loaded_rec.triage_failure_mode == "parse_error"
         assert loaded_rec.confirmation_outcome == "promoted"
 
-    def test_legacy_state_load(self, tmp_path):
-        import json
-
-        run_dir = tmp_path / "legacy"
-        run_dir.mkdir(parents=True)
-        blob = {
-            "run_id": "legacy",
-            "scope": {
-                "branch": "m",
-                "commit": "c",
-                "tracked_files": ["a.py"],
-                "mandatory_files": ["a.py"],
-                "focus": [],
-            },
-            "queued_files": ["a.py"],
-            "triage_records": {
-                "a.py": {
-                    "path": "a.py",
-                    "priority": "SKIP",
-                    "confidence": "medium",
-                    "bug_classes": [],
-                    "summary": "old",
-                    "relevant_symbols": [],
-                    "suspicious_flows": [],
-                    "needs_followup": False,
-                }
-            },
-            "phase": "deep_review",
-        }
-        (run_dir / "state.json").write_text(json.dumps(blob))
-        loaded = AuditRunState.load(tmp_path, "legacy")
-        rec = loaded.triage_records["a.py"]
-        assert rec.promotion_reasons == []
-        assert rec.triage_failure_mode is None
-        assert rec.confirmation_outcome is None
-
 
 class TestAttackScoreCache:
     """Phase 1 caches attack-surface scores; dependency_index aliases caller_index."""
@@ -5014,16 +5409,14 @@ class TestForceReviewConfig:
             "swival/audit.py",
             "swival/edit.py",
         ]
-        # sources are not exposed in the public config dict; query them via
-        # the dedicated helper.
-        from swival.audit import _load_force_review
+        from swival.audit import _load_audit_config
 
-        globs, sources = _load_force_review(str(tmp_path))
+        _globs, sources, _turns = _load_audit_config(str(tmp_path))
         assert sources["swival/audit.py"] == "project"
         assert "_force_review_sources" not in cfg["audit"]
 
     def test_merges_global_and_project(self, tmp_path, monkeypatch):
-        from swival.audit import _load_force_review
+        from swival.audit import _load_audit_config
         from swival.config import load_config
 
         xdg = tmp_path / "xdg"
@@ -5037,7 +5430,7 @@ class TestForceReviewConfig:
 
         cfg = load_config(tmp_path)
         assert set(cfg["audit"]["force_review"]) == {"always.py", "here.py"}
-        _, sources = _load_force_review(str(tmp_path))
+        _globs, sources, _turns = _load_audit_config(str(tmp_path))
         assert sources["always.py"] == "global"
         assert sources["here.py"] == "project"
 
@@ -5057,6 +5450,29 @@ class TestForceReviewConfig:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         (tmp_path / "swival.toml").write_text('[audit]\nforce_review = ["ok.py", 42]\n')
         with pytest.raises(ConfigError, match="force_review"):
+            load_config(tmp_path)
+
+    def test_patch_max_turns_project_overrides_global(self, tmp_path, monkeypatch):
+        from swival.audit import _load_audit_config
+        from swival.config import load_config
+
+        xdg = tmp_path / "xdg"
+        (xdg / "swival").mkdir(parents=True)
+        (xdg / "swival" / "config.toml").write_text("[audit]\npatch_max_turns = 60\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+        (tmp_path / "swival.toml").write_text("[audit]\npatch_max_turns = 75\n")
+
+        cfg = load_config(tmp_path)
+        assert cfg["audit"]["patch_max_turns"] == 75
+        _globs, _sources, turns = _load_audit_config(str(tmp_path))
+        assert turns == 75
+
+    def test_patch_max_turns_rejects_invalid(self, tmp_path, monkeypatch):
+        from swival.config import load_config, ConfigError
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        (tmp_path / "swival.toml").write_text("[audit]\npatch_max_turns = 0\n")
+        with pytest.raises(ConfigError, match="patch_max_turns"):
             load_config(tmp_path)
 
 

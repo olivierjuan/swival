@@ -536,10 +536,12 @@ def _load_single(path: Path, label: str) -> dict:
     if audit_section is not None:
         if not isinstance(audit_section, dict):
             raise ConfigError(f"{label}: 'audit' must be a table")
+        allowed_audit_keys = {"force_review", "patch_max_turns"}
         for key in audit_section:
-            if key != "force_review":
+            if key not in allowed_audit_keys:
+                allowed = ", ".join(sorted(allowed_audit_keys))
                 raise ConfigError(
-                    f"{label}: unknown key 'audit.{key}'. Allowed keys: force_review"
+                    f"{label}: unknown key 'audit.{key}'. Allowed keys: {allowed}"
                 )
         force_review = audit_section.get("force_review", [])
         if not isinstance(force_review, list):
@@ -552,6 +554,19 @@ def _load_single(path: Path, label: str) -> dict:
                 raise ConfigError(
                     f"{label}: audit.force_review[{i}]: expected string, "
                     f"got {type(glob).__name__}"
+                )
+        if "patch_max_turns" in audit_section:
+            patch_max_turns = audit_section["patch_max_turns"]
+            if isinstance(patch_max_turns, bool) or not isinstance(
+                patch_max_turns, int
+            ):
+                raise ConfigError(
+                    f"{label}: 'audit.patch_max_turns' must be an integer >= 1, "
+                    f"got {type(patch_max_turns).__name__}"
+                )
+            if patch_max_turns < 1:
+                raise ConfigError(
+                    f"{label}: 'audit.patch_max_turns' must be an integer >= 1"
                 )
         known["audit"] = audit_section
 
@@ -656,6 +671,17 @@ def merge_mcp_configs(
     if toml_servers:
         merged.update(toml_servers)  # toml wins
     return merged
+
+
+def merge_audit_patch_max_turns(
+    global_audit: dict | None, project_audit: dict | None
+) -> int | None:
+    """Merge ``[audit] patch_max_turns`` with project taking precedence."""
+    if project_audit and "patch_max_turns" in project_audit:
+        return project_audit["patch_max_turns"]
+    if global_audit and "patch_max_turns" in global_audit:
+        return global_audit["patch_max_turns"]
+    return None
 
 
 def merge_audit_force_review(
@@ -850,8 +876,14 @@ def load_config(base_dir: Path) -> dict:
     merged = {**global_config, **project_config}
 
     audit_globs, _ = merge_audit_force_review(global_audit, project_audit)
+    audit_patch_max_turns = merge_audit_patch_max_turns(global_audit, project_audit)
+    audit_merged = {}
     if audit_globs:
-        merged["audit"] = {"force_review": audit_globs}
+        audit_merged["force_review"] = audit_globs
+    if audit_patch_max_turns is not None:
+        audit_merged["patch_max_turns"] = audit_patch_max_turns
+    if audit_merged:
+        merged["audit"] = audit_merged
 
     mcp_servers = merge_mcp_configs(project_mcp, global_mcp)
     if mcp_servers:
