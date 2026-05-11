@@ -235,8 +235,24 @@ halfway. Pause, resume, replace, or clear the goal at any time. See
 endpoint that other agents can call over HTTP. Multi-turn context, streaming,
 rate limiting, and bearer auth are built in.
 
-**Skills, MCP, and A2A.** Extend the agent with SKILL.md-based skills for
-reusable workflows, connect to external tools via the Model Context Protocol,
+**ACP for editors.** Run `swival --acp` and Swival speaks the Agent Client
+Protocol on stdio, so editors that act as ACP clients (Zed, the
+`agent-client-protocol.nvim` plugin, and similar) can drive a Swival agent the
+same way they drive Claude Code, Gemini CLI, or codex. See
+[ACP](docs.md/acp.md) for editor setup.
+
+**Built-in security audit.** Run `/audit` and Swival scans your codebase for
+provable security bugs. Findings go through a multi-phase pipeline (triage,
+deep review, verification in isolated worktrees) so the final report tends to
+contain real bugs with patches rather than speculative findings. Supports
+incremental resume, targeted regeneration of individual findings, and a
+calibration mode for measuring triage recall. See [Security
+Audit](docs.md/audit.md) for the full flag reference.
+
+**Skills, MetaSKILLs, MCP, ACP, and A2A.** Extend the agent with SKILL.md-based
+skills for reusable workflows, write dynamic skill programs in a safe Python
+subset with [MetaSKILLs](docs.md/metaskills.md), connect to external tools via
+the Model Context Protocol, plug into editors via the Agent Client Protocol,
 and talk to remote agents via the Agent-to-Agent (A2A) protocol.
 
 **Small enough to read and hack.** A compact Python codebase with no framework
@@ -262,6 +278,8 @@ Full documentation is available at [swival.dev](https://swival.dev/).
   web fetching, thinking, task tracking, command execution
 - [Safety and Sandboxing](docs.md/safety-and-sandboxing.md) -- path resolution,
   symlink protection, filesystem access modes, command execution modes
+- [Security Audit](docs.md/audit.md) -- multi-phase `/audit` scan with triage,
+  deep review, verification in isolated worktrees, and patch generation
 - [Skills](docs.md/skills.md) -- creating and using SKILL.md-based agent skills
 - [Metaskills](docs.md/metaskills.md) -- portable dynamic skill workflow
   specification for users and agent implementers
@@ -276,6 +294,8 @@ Full documentation is available at [swival.dev](https://swival.dev/).
   Protocol
 - [A2A](docs.md/a2a.md) -- connecting to remote agents via the Agent-to-Agent
   protocol
+- [ACP](docs.md/acp.md) -- driving Swival from ACP-aware editors like Zed and
+  agent-client-protocol.nvim via the Agent Client Protocol
 - [Reports](docs.md/reports.md) -- JSON reports for benchmarking and evaluation
 - [Web Browsing](docs.md/web-browsing.md) -- Chrome DevTools MCP, Lightpanda
   MCP, and agent-browser for web interaction

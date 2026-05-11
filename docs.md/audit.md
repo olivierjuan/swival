@@ -157,7 +157,7 @@ Saved audit state from versions before Phase 5 artifact retry is not supported a
 swival> /audit --resume
 ```
 
-`--regen` regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases. Use `--finding` with 1-based Phase 5 finding numbers to regenerate only selected artifacts.
+`--regen` regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases. Use `--finding` with 1-based Phase 5 finding numbers to regenerate only selected artifacts. `--finding` requires `--regen` and is rejected if you pass it on a fresh run.
 
 ```text
 swival> /audit --regen

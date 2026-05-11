@@ -45,6 +45,8 @@ REPL mode keeps a shared conversation state, so each new question can build on e
 swival
 ```
 
+It starts automatically when no task is given on a terminal. Pass `--repl` to force REPL mode even when a task argument is present or when stdin is not a terminal (useful for `expect`-style scripting). `--repl` is incompatible with `--serve`, `--reviewer`, `--self-review`, `--reviewer-mode`, and `--acp`.
+
 The REPL is built on `prompt-toolkit`, so it supports input history, history search, and normal terminal line editing.
 
 ## Input Commands
@@ -209,6 +211,10 @@ Useful for long-running sessions.
 `--skills-dir` adds external skill directories and can be passed more than once.
 
 `--no-skills` disables skill discovery and removes the `use_skill` tool path.
+
+`--metaskills POLICY` sets the metaskill execution policy. Valid policies are `local` (default; only metaskills shipped inside the workspace can run), `all` (any discovered metaskill can run, including those in external skill directories), and `off` (metaskill execution is disabled, though static skills remain available). See [Metaskills](metaskills.md) for what metaskills are.
+
+`--no-metaskills` is shorthand for `--metaskills off`: skills remain discoverable as static prompts, but no `SKILL.star` program is executed.
 
 ### MCP Flags
 

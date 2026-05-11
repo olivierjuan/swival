@@ -197,7 +197,7 @@ Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/
 <p><code>--resume</code> resumes a previous audit run from its last checkpoint. The resume matches against the current commit and scope (focus argument). If the commit or scope changed since the original run, no match is found and the command returns an error. On resume, completed phases are skipped, failed verifications are requeued, and failed Phase 5 artifact generation is retried.</p>
 <pre><code class="language-text">swival&gt; /audit --resume
 </code></pre>
-<p><code>--regen</code> regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases. Use <code>--finding</code> with 1-based Phase 5 finding numbers to regenerate only selected artifacts.</p>
+<p><code>--regen</code> regenerates reports and patches for a completed audit run. It reuses the verified findings from the original run and re-runs only phase 5 (artifact generation). This is useful when you want to improve patch quality without repeating the expensive triage, deep review, and verification phases. Use <code>--finding</code> with 1-based Phase 5 finding numbers to regenerate only selected artifacts. <code>--finding</code> requires <code>--regen</code> and is rejected if you pass it on a fresh run.</p>
 <pre><code class="language-text">swival&gt; /audit --regen
 swival&gt; /audit --regen --finding 2 --patch-max-turns 75
 swival&gt; /audit --regen --finding 2,4-6

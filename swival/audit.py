@@ -1842,7 +1842,7 @@ Your entire response must be a single markdown document and nothing else.
 
 Rules:
 - Confidence must be certain.
-- Provenance must include a link to the Swival Security Scanner URL: {provenance_url}
+- Provenance must include a link to the Swival.dev Security Scanner URL: {provenance_url}
 - Residual Risk must be `None` unless a narrow evidence-based concern remains.
 - Be terse, factual, and evidence-driven."""
 

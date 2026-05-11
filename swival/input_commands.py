@@ -30,6 +30,11 @@ INPUT_COMMANDS: dict[str, CommandInfo] = {
             ("--resume", "Resume a previous audit run from its last checkpoint"),
             ("--regen", "Regenerate reports and patches for a completed audit run"),
             (
+                "--finding N[,M-R]",
+                "With --regen, regenerate only the selected 1-based Phase-5 "
+                "findings (comma-separated values and ranges allowed)",
+            ),
+            (
                 "--all",
                 "Deep-review every file in scope; skip the triage selection",
             ),
@@ -39,6 +44,10 @@ INPUT_COMMANDS: dict[str, CommandInfo] = {
                 "file. Tags findings to expose Phase-2 false negatives.",
             ),
             ("--workers N", "Number of parallel verification workers (default: 4)"),
+            (
+                "--patch-max-turns N",
+                "Phase-5 patch-generation turn budget (default: 50)",
+            ),
             (
                 "--debug",
                 "Write a real-time JSONL debug log to .swival/audit/debug.jsonl",

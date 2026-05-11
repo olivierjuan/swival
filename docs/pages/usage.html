@@ -121,6 +121,7 @@ cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.1
 <p>REPL mode keeps a shared conversation state, so each new question can build on earlier turns.</p>
 <pre><code class="language-sh">swival
 </code></pre>
+<p>It starts automatically when no task is given on a terminal. Pass <code>--repl</code> to force REPL mode even when a task argument is present or when stdin is not a terminal (useful for <code>expect</code>-style scripting). <code>--repl</code> is incompatible with <code>--serve</code>, <code>--reviewer</code>, <code>--self-review</code>, <code>--reviewer-mode</code>, and <code>--acp</code>.</p>
 <p>The REPL is built on <code>prompt-toolkit</code>, so it supports input history, history search, and normal terminal line editing.</p>
 <h2 id="input-commands">Input Commands</h2>
 <p>Slash commands work in interactive mode (typed at the REPL prompt) and optionally in one-shot mode. In one-shot mode, command dispatch is disabled by default because the input may come from an untrusted source (a pipe, a file, or an upstream program). Pass <code>--oneshot-commands</code> to enable it:</p>
@@ -204,6 +205,8 @@ swival --oneshot-commands $'/profile fast\n/simplify swival/agent.py'
 <h3 id="skills-flags">Skills Flags</h3>
 <p><code>--skills-dir</code> adds external skill directories and can be passed more than once.</p>
 <p><code>--no-skills</code> disables skill discovery and removes the <code>use_skill</code> tool path.</p>
+<p><code>--metaskills POLICY</code> sets the metaskill execution policy. Valid policies are <code>local</code> (default; only metaskills shipped inside the workspace can run), <code>all</code> (any discovered metaskill can run, including those in external skill directories), and <code>off</code> (metaskill execution is disabled, though static skills remain available). See <a href="metaskills.html">Metaskills</a> for what metaskills are.</p>
+<p><code>--no-metaskills</code> is shorthand for <code>--metaskills off</code>: skills remain discoverable as static prompts, but no <code>SKILL.star</code> program is executed.</p>
 <h3 id="mcp-flags">MCP Flags</h3>
 <p><code>--no-mcp</code> disables MCP server connections entirely, even if servers are configured in <code>swival.toml</code> or <code>.swival/mcp.json</code>.</p>
 <p><code>--mcp-config FILE</code> provides an explicit path to an MCP JSON config file. When set, this replaces the default <code>.swival/mcp.json</code> lookup.</p>

@@ -2,6 +2,14 @@
 
 All notable user-facing changes to Swival.
 
+## 1.0.15
+
+- Swival now speaks the Agent Client Protocol on stdio via `--acp`. `/` and `!` commands are currently ignored when using ACP. `--acp-log` writes diagnostics to a separate log file for debugging client integrations.
+- Agent MetaSKILLs have been implemented. They are a powerful evolution of agent SKILLs, enabling dynamic workflows through instructions written in a Python subset rather than simple prompts.
+- `/audit` triage is less likely to miss files worth deep review.
+- `/audit` artifact generation is now retryable and easier to tune. Phase 5 patch/report failures are persisted as resumable state, verified findings keep stable numbers across retries, `--patch-max-turns` controls the patch-generation turn budget, and `--regen --finding N[,M-R]` can regenerate selected findings only.
+- `/audit --measure-triage` has been added for recall calibration. It runs normal triage, deep-reviews every file in scope, then tags verified findings with whether their source file was escalated or skipped so you can measure triage false negatives.
+
 ## 1.0.14
 
 - `/audit` now accepts an `--all` flag that skips Phase 2 triage and sends every file in scope straight to deep review. Useful when you have already narrowed scope to a subtree you want exhaustively reviewed and do not want triage second-guessing which files are worth a closer look. The flag is recorded with the run, so a bare `/audit --resume` picks up an `--all` run without needing the flag again.
