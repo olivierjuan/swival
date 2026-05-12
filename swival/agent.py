@@ -682,6 +682,7 @@ def _fix_orphaned_tool_calls(messages: list) -> bool:
                 msg["tool_calls"] = kept
             else:
                 msg.pop("tool_calls", None)
+                msg.pop("reasoning_content", None)
                 if not _msg_content(msg):
                     msg["content"] = ""
         else:
@@ -689,6 +690,8 @@ def _fix_orphaned_tool_calls(messages: list) -> bool:
                 msg.tool_calls = kept
             else:
                 msg.tool_calls = None
+                if hasattr(msg, "reasoning_content"):
+                    msg.reasoning_content = None
                 if not _msg_content(msg):
                     msg.content = ""
     return fixed
@@ -763,8 +766,34 @@ _LITELLM_INTERNAL_KEYS = {
 }
 
 
+def _needs_reasoning_content(model_id: str, base_url: str | None) -> bool:
+    """Whether the target provider requires reasoning_content to round-trip.
+
+    Moonshot (Kimi) rejects tool-calling conversations when assistant
+    messages with tool_calls lack reasoning_content; Xiaomi MiMo returns
+    a 400 when historical reasoning is missing from any tool-calling
+    assistant turn in the conversation history.
+    """
+    model_lower = model_id.lower()
+    if "kimi" in model_lower or "mimo" in model_lower:
+        return True
+    if base_url:
+        base_lower = base_url.lower()
+        if "moonshot" in base_lower or "xiaomimimo" in base_lower:
+            return True
+    return False
+
+
 def _promote_reasoning_content(msg) -> None:
-    """If content is empty but reasoning_content has text, promote it."""
+    """If content is empty but reasoning_content has text, promote it.
+
+    Skipped when tool_calls are present: reasoning-content-aware providers
+    (see ``_needs_reasoning_content``) require the field as a separate
+    attribute on tool-calling assistant messages in subsequent turns, so
+    it must not be collapsed into content.
+    """
+    if getattr(msg, "tool_calls", None):
+        return
     content = getattr(msg, "content", None)
     if content:
         return
@@ -778,14 +807,19 @@ def _msg_to_dict(msg) -> dict:
     """Convert a litellm Message to a plain dict safe for re-submission.
 
     Strips litellm-internal fields (e.g. provider_specific_fields) that some
-    providers reject as extra inputs.
+    providers reject as extra inputs. Keeps reasoning_content on tool-calling
+    assistant messages so reasoning-content-aware providers (Xiaomi MiMo,
+    Moonshot/Kimi) get the field they require on the next turn.
     """
     d = (
         msg.model_dump(exclude_none=True)
         if hasattr(msg, "model_dump")
         else dict(vars(msg))
     )
+    keep_reasoning = bool(d.get("tool_calls"))
     for key in _LITELLM_INTERNAL_KEYS:
+        if key == "reasoning_content" and keep_reasoning:
+            continue
         d.pop(key, None)
     return d
 
@@ -3304,21 +3338,15 @@ def call_llm(
 
     messages = [_strip_internal(m) for m in messages]
 
-    # --- Outbound: fill reasoning_content for providers that require it ---
-    # Moonshot (Kimi) rejects tool-calling conversations when assistant
-    # messages that have tool_calls lack a reasoning_content field.
-    _needs_reasoning = "kimi" in model_id.lower() or (
-        base_url and "moonshot" in base_url.lower()
-    )
-    if _needs_reasoning:
-        for m in messages:
-            if (
-                isinstance(m, dict)
-                and m.get("role") == "assistant"
-                and m.get("tool_calls")
-                and not m.get("reasoning_content")
-            ):
+    _needs_reasoning = _needs_reasoning_content(model_id, base_url)
+    for m in messages:
+        if not (isinstance(m, dict) and m.get("role") == "assistant"):
+            continue
+        if _needs_reasoning:
+            if m.get("tool_calls") and not m.get("reasoning_content"):
                 m["reasoning_content"] = " "
+        else:
+            m.pop("reasoning_content", None)
 
     # --- Outbound: encrypt secrets ---
     if secret_shield is not None:

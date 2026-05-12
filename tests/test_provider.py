@@ -9,7 +9,10 @@ from unittest.mock import patch, MagicMock
 from swival.agent import (
     call_llm,
     resolve_provider,
+    _fix_orphaned_tool_calls,
+    _msg_to_dict,
     _pick_best_choice,
+    _promote_reasoning_content,
     _sanitize_assistant_content,
     _strip_leaked_think_head,
 )
@@ -2948,3 +2951,333 @@ class TestKimiReasoningContent:
                 0
             ]
             assert assistant_msg["reasoning_content"] == "I need to call a tool"
+
+
+# ---------------------------------------------------------------------------
+# Xiaomi MiMo reasoning_content round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestMimoReasoningContent:
+    """Verify reasoning_content survives multi-turn round-trip for Xiaomi MiMo.
+
+    MiMo returns a 400 when a tool-calling assistant turn in the history is
+    missing its reasoning_content. See:
+    https://platform.xiaomimimo.com/docs/en-US/usage-guide/passing-back-reasoning_content
+    """
+
+    def _mock_response(self):
+        choice = MagicMock()
+        choice.message = MagicMock(content="ok", tool_calls=None)
+        choice.finish_reason = "stop"
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    def test_mimo_detected_by_model_id(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                "http://localhost:8080/v1",
+                "mimo-v2.5-pro",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="generic",
+                api_key="sk-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert asst["reasoning_content"] == " "
+
+    def test_mimo_detected_by_base_url(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                "https://api.xiaomimimo.com/v1",
+                "some-other-model",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="generic",
+                api_key="sk-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert asst["reasoning_content"] == " "
+
+    def test_mimo_preserves_actual_reasoning(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+                "reasoning_content": "I should call f to look up the answer.",
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                "https://api.xiaomimimo.com/v1",
+                "mimo-v2.5-pro",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="generic",
+                api_key="sk-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert asst["reasoning_content"] == "I should call f to look up the answer."
+
+
+# ---------------------------------------------------------------------------
+# reasoning_content round-trip helpers
+# ---------------------------------------------------------------------------
+
+
+class TestMsgToDictReasoningContent:
+    def test_strips_reasoning_when_no_tool_calls(self):
+        class FakeMsg:
+            def model_dump(self, exclude_none=False):
+                return {
+                    "role": "assistant",
+                    "content": "answer",
+                    "reasoning_content": "internal scratch",
+                }
+
+        d = _msg_to_dict(FakeMsg())
+        assert "reasoning_content" not in d
+        assert d["content"] == "answer"
+
+    def test_keeps_reasoning_when_tool_calls_present(self):
+        class FakeMsg:
+            def model_dump(self, exclude_none=False):
+                return {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "I should call the tool.",
+                    "tool_calls": [
+                        {
+                            "id": "tc1",
+                            "type": "function",
+                            "function": {"name": "f", "arguments": "{}"},
+                        }
+                    ],
+                }
+
+        d = _msg_to_dict(FakeMsg())
+        assert d["reasoning_content"] == "I should call the tool."
+        assert d["tool_calls"][0]["id"] == "tc1"
+
+
+class TestPromoteReasoningContent:
+    def test_promotes_when_no_tool_calls(self):
+        msg = types.SimpleNamespace(content="", reasoning_content="thinking out loud")
+        _promote_reasoning_content(msg)
+        assert msg.content == "thinking out loud"
+        assert msg.reasoning_content is None
+
+    def test_skips_when_tool_calls_present(self):
+        tc = types.SimpleNamespace(
+            id="tc1",
+            type="function",
+            function=types.SimpleNamespace(name="f", arguments="{}"),
+        )
+        msg = types.SimpleNamespace(
+            content="",
+            reasoning_content="I will call f",
+            tool_calls=[tc],
+        )
+        _promote_reasoning_content(msg)
+        assert msg.content == ""
+        assert msg.reasoning_content == "I will call f"
+
+
+class TestNonReasoningProviderStripsReasoningContent:
+    """Ensure providers that do not require reasoning_content never receive it.
+
+    Storing reasoning_content in history is required for MiMo/Kimi, but if the
+    conversation later targets a strict provider (e.g. OpenAI, ChatGPT) we must
+    not leak the field outbound.
+    """
+
+    def _mock_response(self):
+        choice = MagicMock()
+        choice.message = MagicMock(content="ok", tool_calls=None)
+        choice.finish_reason = "stop"
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    def test_non_kimi_strips_existing_reasoning_content(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+                "reasoning_content": "leftover thought",
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                "http://localhost:8080/v1",
+                "qwen-2.5",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="generic",
+                api_key="sk-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert "reasoning_content" not in asst
+
+    def test_non_kimi_strips_reasoning_on_non_tool_call_assistant(self):
+        """Replayed/imported transcripts may carry reasoning_content on an
+        assistant message that has no tool_calls. Strict providers must never
+        see it."""
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "earlier answer",
+                "reasoning_content": "internal thought from a prior session",
+            },
+            {"role": "user", "content": "next question"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                "http://localhost:8080/v1",
+                "qwen-2.5",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="generic",
+                api_key="sk-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert "reasoning_content" not in asst
+
+
+class TestOrphanedToolCallsStripsReasoning:
+    def test_orphan_cleanup_drops_reasoning_when_emptied(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+                "reasoning_content": "I will call f",
+            },
+        ]
+        fixed = _fix_orphaned_tool_calls(messages)
+        assert fixed is True
+        asst = messages[1]
+        assert "tool_calls" not in asst
+        assert "reasoning_content" not in asst
+        assert asst["content"] == ""
+
+    def test_orphan_cleanup_keeps_reasoning_when_tool_calls_partially_kept(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    },
+                    {
+                        "id": "tc2",
+                        "type": "function",
+                        "function": {"name": "g", "arguments": "{}"},
+                    },
+                ],
+                "reasoning_content": "I will call f and g",
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        fixed = _fix_orphaned_tool_calls(messages)
+        assert fixed is True
+        asst = messages[1]
+        assert len(asst["tool_calls"]) == 1
+        assert asst["tool_calls"][0]["id"] == "tc1"
+        assert asst["reasoning_content"] == "I will call f and g"
