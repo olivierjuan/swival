@@ -58,7 +58,7 @@ swival --oneshot-commands "/status"
 swival --oneshot-commands $'/profile fast\n/simplify swival/agent.py'
 ```
 
-Without `--oneshot-commands`, input that looks like a command script is treated as a plain natural-language prompt. A few commands (`/continue`, `/copy`) are REPL-only and are rejected even with `--oneshot-commands`.
+Without `--oneshot-commands`, input that looks like a command script is treated as a plain natural-language prompt. A few commands (`/continue`, `/copy`, `!!`) are REPL-only and are rejected even with `--oneshot-commands`. Most other commands, including `/loop`, work in both modes.
 
 `/help` prints the command reference in the terminal.
 
@@ -81,6 +81,13 @@ Without `--oneshot-commands`, input that looks like a command script is treated 
 `/goal <objective>` puts the REPL into a persistent goal mode and keeps driving toward that objective across turns until the model calls `complete_goal`, declares a blocker, or `--max-turns` is hit. Use a regular prompt for "answer or do this now"; use `/goal` for "keep working on this until it is actually done." `/goal` with no argument prints the current status; `/goal replace`, `/goal pause`, `/goal resume`, and `/goal clear` manage the active goal. See [Goals](goal.md) for the full walkthrough, examples, and budget behavior.
 
 `/continue` restarts the agent loop for the existing conversation without adding a new user message.
+
+`/loop <interval> <prompt-or-command>` runs a prompt on a recurring interval until you stop it. The interval accepts compound durations like `5m`, `30s`, `1h30m`, `2h`, with a 5-second floor and a 24-hour ceiling. If you omit the interval, it defaults to 10 minutes. The prompt can be plain text, a slash command, or a `!custom-command` — each iteration goes through the same dispatch path as if you typed it yourself, so state (todo list, snapshot, file tracker) carries forward across runs. `Ctrl-C` once skips the current iteration; press it twice within two seconds to exit the loop. Works in one-shot mode too, which is the recommended way to run Swival as a long-lived poller under `systemd`, `tmux`, or `nohup`: each iteration's answer is streamed to stdout with a blank-line separator, diagnostics go to stderr, and `SIGTERM` shuts the loop down cleanly between iterations (a second `SIGTERM` exits immediately with code 143).
+
+```sh
+swival --oneshot-commands '/loop 5m /babysit-prs'
+swival --oneshot-commands '/loop 30s check git status and report unusual activity'
+```
 
 `/status` shows a compact session overview: model, endpoint, context usage, message/turn counts, file access, mode flags, and state summaries (thinking, todo, snapshot, checkpoints, continue file).
 

@@ -74,6 +74,7 @@ class StepResult:
     stop: bool = False
     exhausted: bool = False
     is_error: bool = False
+    interrupted: bool = False
 
 
 def _strip_outer_blank_lines(text: str) -> str:

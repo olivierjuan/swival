@@ -112,6 +112,12 @@ INPUT_COMMANDS: dict[str, CommandInfo] = {
         desc="Review session for mistakes and persist to memory",
         kind="agent_turn",
     ),
+    "/loop": CommandInfo(
+        desc="Run a prompt or command on a recurring interval",
+        arg="[interval] <prompt>",
+        kind="agent_turn",
+        modes=("repl", "oneshot"),
+    ),
     "/new": CommandInfo(
         desc="Reset conversation to initial state",
         kind="state_change",

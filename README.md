@@ -231,6 +231,12 @@ audits, or end-to-end fixes, and let it grind for hours without giving up
 halfway. Pause, resume, replace, or clear the goal at any time. See
 [Goals](docs.md/goal.md) for details.
 
+**Run on a timer.** `/loop 5m /babysit-prs` re-runs a prompt or command every
+five minutes; pair it with one-shot mode and `systemd` or `tmux` to turn
+Swival into a long-lived poller. The interval accepts compound durations
+like `1h30m`, each iteration streams its output to stdout, and `SIGTERM`
+shuts the loop down cleanly between iterations.
+
 **A2A server mode.** Run `swival --serve` and your agent becomes an A2A
 endpoint that other agents can call over HTTP. Multi-turn context, streaming,
 rate limiting, and bearer auth are built in.

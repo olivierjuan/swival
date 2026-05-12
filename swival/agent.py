@@ -8047,6 +8047,14 @@ def _repl_help() -> str:
         key = (info.desc, info.arg)
         groups.setdefault(key, []).append(cmd)
 
+    cmd_col = 24
+    opt_col = 20
+
+    def _row(indent: str, label: str, desc: str, col: int) -> list[str]:
+        if len(label) < col:
+            return [f"{indent}{label.ljust(col)}{desc}"]
+        return [f"{indent}{label}", f"{indent}{' ' * col}{desc}"]
+
     lines = ["Available commands:"]
     seen: set[str] = set()
     for cmd in sorted(INPUT_COMMANDS):
@@ -8060,15 +8068,19 @@ def _repl_help() -> str:
         label = ", ".join(group)
         if info.arg:
             label += f" {info.arg}"
-        lines.append(f"  {label:<19}{info.desc}")
+        lines.extend(_row("  ", label, info.desc, cmd_col))
         if info.options:
             for flag, flag_desc in info.options:
-                lines.append(f"      {flag:<15}{flag_desc}")
+                lines.extend(_row("      ", flag, flag_desc, opt_col))
 
     lines.append("")
-    lines.append(
-        f"  {'!command [args]':<19}"
-        "Run <config_dir>/commands/command; output becomes your next prompt"
+    lines.extend(
+        _row(
+            "  ",
+            "!command [args]",
+            "Run <config_dir>/commands/command; output becomes your next prompt",
+            cmd_col,
+        )
     )
     return "\n".join(lines)
 
@@ -8827,7 +8839,7 @@ def _run_agent_step(
     )
     if interrupted:
         fmt.warning(f"interrupted, {interrupt_label} aborted.")
-        return StepResult(kind="agent_turn")
+        return StepResult(kind="agent_turn", interrupted=True)
     step = _finalize_agent_step(answer, exhausted, history_label, ctx)
     if ctx.goal_state is not None:
         rec = ctx.goal_state.get()
@@ -9120,6 +9132,9 @@ def execute_input(
         if cmd == "/audit":
             return _execute_audit(cmd_arg, ctx)
 
+        if cmd == "/loop":
+            return _execute_loop(cmd_arg, ctx, mode=mode)
+
         # Unknown slash command.
         return StepResult(
             kind="info",
@@ -9173,7 +9188,7 @@ def _execute_init(cmd_arg: str, ctx: InputContext) -> StepResult:
         ctx.messages.append({"role": "user", "content": prompt})
         result = _run_init_pass(f"/init pass {_pass}", "interrupted, /init aborted.")
         if result is None:
-            return StepResult(kind="agent_turn", text=None)
+            return StepResult(kind="agent_turn", text=None, interrupted=True)
         answer, exhausted = result
         last_answer = answer
         if exhausted:
@@ -9192,7 +9207,7 @@ def _execute_init(cmd_arg: str, ctx: InputContext) -> StepResult:
             "/init pass 4 (retry)", "interrupted, /init retry aborted."
         )
         if result is None:
-            return StepResult(kind="agent_turn", text=None)
+            return StepResult(kind="agent_turn", text=None, interrupted=True)
         last_answer, exhausted = result
         if exhausted:
             any_exhausted = True
@@ -9217,7 +9232,7 @@ def _execute_audit(cmd_arg: str, ctx: InputContext) -> StepResult:
         result = run_audit_command(cmd_arg, ctx)
     except KeyboardInterrupt:
         fmt.warning("interrupted, audit aborted.")
-        return StepResult(kind="agent_turn")
+        return StepResult(kind="agent_turn", interrupted=True)
     except Exception as e:
         return StepResult(
             kind="agent_turn", text=f"error: audit failed: {e}", is_error=True
@@ -9226,6 +9241,228 @@ def _execute_audit(cmd_arg: str, ctx: InputContext) -> StepResult:
     if not ctx.no_history and result:
         append_history(ctx.base_dir, "/audit", result, diagnostics=ctx.verbose)
     return StepResult(kind="agent_turn", text=result)
+
+
+_LOOP_DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$")
+_LOOP_DEFAULT_SECONDS = 600
+_LOOP_MIN_SECONDS = 5
+_LOOP_MAX_SECONDS = 24 * 60 * 60
+_LOOP_DOUBLE_TAP_WINDOW = 2.0
+
+
+def _parse_loop_args(cmd_arg: str) -> tuple[int, str]:
+    """Parse ``/loop`` arguments into ``(interval_seconds, prompt)``.
+
+    The first whitespace-delimited token is treated as an interval only if
+    it fully matches the duration grammar. Otherwise the entire argument is
+    the prompt and the interval defaults to 10 minutes.
+    """
+    stripped = cmd_arg.strip()
+    if not stripped:
+        raise ValueError("/loop requires a prompt")
+
+    first, _, rest = stripped.partition(" ")
+    rest = rest.lstrip()
+
+    interval = _try_parse_duration(first)
+    if interval is not None and rest:
+        return interval, rest
+
+    if interval is not None and not rest:
+        raise ValueError(f"/loop got an interval ({first}) but no prompt to run")
+
+    return _LOOP_DEFAULT_SECONDS, stripped
+
+
+def _try_parse_duration(token: str) -> int | None:
+    """Return seconds if ``token`` is a valid duration; ``None`` otherwise.
+
+    Validates the floor and ceiling and rejects degenerate values like
+    ``0s`` and the empty match (no unit) so a bare integer falls through
+    to the prompt branch.
+    """
+    if not token:
+        return None
+    match = _LOOP_DURATION_RE.fullmatch(token)
+    if match is None:
+        return None
+    h, m, s = match.groups()
+    if h is None and m is None and s is None:
+        return None
+    total = (int(h or 0) * 3600) + (int(m or 0) * 60) + int(s or 0)
+    if total < _LOOP_MIN_SECONDS:
+        raise ValueError(
+            f"/loop interval {token} is below the {_LOOP_MIN_SECONDS}s floor"
+        )
+    if total > _LOOP_MAX_SECONDS:
+        raise ValueError(
+            f"/loop interval {token} exceeds the {_LOOP_MAX_SECONDS // 3600}h ceiling"
+        )
+    return total
+
+
+def _format_loop_duration(seconds: int) -> str:
+    """Render seconds as a compact ``1h2m3s``-style string."""
+    parts = []
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
+    if s or not parts:
+        parts.append(f"{s}s")
+    return "".join(parts)
+
+
+def _loop_emit_repl(answer: str | None) -> None:
+    """Render an iteration's answer for REPL mode."""
+    if answer:
+        fmt.repl_answer(answer)
+
+
+def _loop_emit_oneshot(answer: str | None) -> None:
+    """Render an iteration's answer for one-shot mode by streaming to stdout."""
+    if answer:
+        print(answer, flush=True)
+        print(flush=True)
+
+
+def _execute_loop(cmd_arg: str, ctx: InputContext, *, mode: str) -> StepResult:
+    """Run a prompt at a fixed cadence until interrupted.
+
+    ``--oneshot-commands`` gates the outer ``/loop`` invocation in main();
+    nested ``/audit``, ``!checks``, etc. dispatched inside the loop body
+    are not separately gated, by design — the outer gate already
+    authorized command dispatch for this script.
+    """
+    import signal as _signal
+    import threading
+
+    try:
+        interval_seconds, prompt = _parse_loop_args(cmd_arg)
+    except ValueError as e:
+        return StepResult(kind="info", text=f"error: {e}", is_error=True)
+
+    parsed_prompt = parse_input_line(prompt)
+    if not parsed_prompt.raw:
+        return StepResult(
+            kind="info",
+            text="error: /loop prompt parsed as empty",
+            is_error=True,
+        )
+
+    emit = _loop_emit_oneshot if mode == "oneshot" else _loop_emit_repl
+    prompt_preview = prompt if len(prompt) <= 60 else prompt[:57] + "..."
+    interval_label = _format_loop_duration(interval_seconds)
+
+    stop_event = threading.Event()
+    total_turns = 0
+    prior_sigterm = None
+    if mode == "oneshot":
+
+        def _sigterm(_signum, _frame):
+            if stop_event.is_set():
+                raise SystemExit(143)
+            stop_event.set()
+
+        try:
+            prior_sigterm = _signal.signal(_signal.SIGTERM, _sigterm)
+        except (ValueError, OSError):
+            prior_sigterm = None
+
+    interrupt_tracker = {"last": None}
+
+    def _is_double_tap() -> bool:
+        now = time.monotonic()
+        prev = interrupt_tracker["last"]
+        interrupt_tracker["last"] = now
+        return prev is not None and (now - prev) < _LOOP_DOUBLE_TAP_WINDOW
+
+    iteration = 0
+    fmt.info(f"[loop start] interval={interval_label} prompt={prompt_preview!r}")
+
+    try:
+        while not stop_event.is_set():
+            iteration += 1
+            fmt.info(
+                f"[loop iter {iteration} - {time.strftime('%a %H:%M:%S')}] "
+                f"running: {prompt_preview}"
+            )
+
+            try:
+                step = execute_input(parsed_prompt, ctx, mode=mode)
+            except KeyboardInterrupt:
+                if _is_double_tap():
+                    fmt.warning("[loop] double-tap interrupt, exiting.")
+                    break
+                fmt.warning(
+                    "[loop] interrupted; press Ctrl-C again within "
+                    f"{int(_LOOP_DOUBLE_TAP_WINDOW)}s to exit the loop."
+                )
+                if not _loop_interruptible_sleep(interval_seconds, stop_event):
+                    break
+                continue
+
+            if step.kind == "agent_turn":
+                step_turns = ctx.turn_state.get("turns_used", 0) or 0
+                total_turns += step_turns
+                ctx.turn_state["turns_used"] = total_turns
+                report = ctx.loop_kwargs.get("report")
+                if report is not None:
+                    ctx.loop_kwargs["turn_offset"] = report.max_turn_seen
+                if step_turns:
+                    fmt.info(
+                        f"[loop iter {iteration}] turns={step_turns} "
+                        f"total={total_turns}"
+                    )
+
+            if step.is_error:
+                fmt.warning(f"[loop iter {iteration}] error: {step.text}")
+            elif step.interrupted:
+                if _is_double_tap():
+                    fmt.warning("[loop] double-tap interrupt, exiting.")
+                    break
+                fmt.warning(
+                    f"[loop iter {iteration}] interrupted; press Ctrl-C "
+                    f"again within {int(_LOOP_DOUBLE_TAP_WINDOW)}s to exit "
+                    "the loop."
+                )
+            else:
+                emit(step.text)
+                if step.exhausted:
+                    fmt.warning(f"[loop iter {iteration}] max turns reached.")
+
+            if step.stop:
+                fmt.info(f"[loop iter {iteration}] stop requested, exiting.")
+                break
+
+            if not _loop_interruptible_sleep(interval_seconds, stop_event):
+                break
+    finally:
+        if prior_sigterm is not None:
+            try:
+                _signal.signal(_signal.SIGTERM, prior_sigterm)
+            except (ValueError, OSError):
+                pass
+
+    summary = f"loop stopped after {iteration} iteration{'s' if iteration != 1 else ''}"
+    if mode == "oneshot":
+        fmt.info(summary)
+        return StepResult(kind="state_change", text=None)
+    return StepResult(kind="state_change", text=summary)
+
+
+def _loop_interruptible_sleep(seconds: int, stop_event) -> bool:
+    """Wait up to ``seconds`` for ``stop_event``. Returns True on timeout.
+
+    A SIGTERM-set event (or any other signal) wakes immediately;
+    KeyboardInterrupt during the wait also returns ``False``.
+    """
+    try:
+        return not stop_event.wait(timeout=seconds)
+    except KeyboardInterrupt:
+        return False
 
 
 def run_input_script(
@@ -9275,7 +9512,10 @@ def run_input_script(
         if step.stop:
             break
 
-        # Agent-turn failures abort the script.
+        # Agent-turn failures (including interrupts) abort the remaining
+        # script. /loop returns kind="state_change" in one-shot mode, so
+        # its deliberate text=None falls through and the enclosing script
+        # continues.
         if step.kind == "agent_turn" and step.text is None:
             break
 
