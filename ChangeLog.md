@@ -4,9 +4,11 @@ All notable user-facing changes to Swival.
 
 ## 1.0.15
 
-- `/loop` now accepts natural-language intervals. Alongside the compact `5m`, `1h30m` form you can write `1 min`, `5 minutes`, `30 sec`, `every hour`, `every 5 minutes`, `a minute`, `half an hour`, or join components with `and` as in `1 minute and 30 seconds`. The 5-second floor and 24-hour ceiling are unchanged. Inputs that begin as an interval but are malformed (repeated units, trailing `and`, `every` with no duration, bounds violations) now raise an error instead of silently looping the wrong prompt.
 - Swival now speaks the Agent Client Protocol on stdio via `--acp`. `/` and `!` commands are currently ignored when using ACP. `--acp-log` writes diagnostics to a separate log file for debugging client integrations.
 - Agent MetaSKILLs have been implemented. They are a powerful evolution of agent SKILLs, enabling dynamic workflows through instructions written in a Python subset rather than simple prompts.
+- Quick-shell command output, reviewer feedback, and fetched URL bodies now render inside Rich panels when stderr is a TTY.
+- Code diffs produced by `edit_file` are now rendered with improved formatting.
+- Leaked `</think>` tag heads from models with broken chat templates are now stripped from assistant responses before display.
 - `/audit` triage is less likely to miss files worth deep review.
 - `/audit` artifact generation is now retryable and easier to tune. Phase 5 patch/report failures are persisted as resumable state, verified findings keep stable numbers across retries, `--patch-max-turns` controls the patch-generation turn budget, and `--regen --finding N[,M-R]` can regenerate selected findings only.
 - `/audit --measure-triage` has been added for recall calibration. It runs normal triage, deep-reviews every file in scope, then tags verified findings with whether their source file was escalated or skipped so you can measure triage false negatives.
