@@ -445,6 +445,7 @@ class Session:
             command_tool_schemas=_command_tool_schemas,
             files_mode=self.files,
             metaskill_names=self._metaskill_names,
+            subagents=self.subagents,
         )
 
         # Clean up stale cmd_output files

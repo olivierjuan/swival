@@ -5663,12 +5663,21 @@ _EDITING_GUIDANCE_BLOCK = (
     "\n"
 )
 
+_SUBAGENT_GUIDANCE_BLOCK = (
+    "- **Use `spawn_subagent` for independent parallel work.** When a task has clearly "
+    "separable parts (e.g. fixing two unrelated files, researching one area while editing "
+    "another, running a test while making a change elsewhere), spawn subagents to handle "
+    "them concurrently. Include full context in the task description — subagents have no "
+    "access to your conversation. Use `check_subagents` to collect results.\n"
+)
+
 
 def _apply_capability_substitutions(
     system_content: str,
     *,
     no_memory: bool,
     files_mode: str,
+    subagents: bool = False,
 ) -> str:
     """Substitute capability-gated placeholders in the prompt template.
 
@@ -5676,11 +5685,15 @@ def _apply_capability_substitutions(
     {{EDITING_GUIDANCE}}: dropped when files_mode == "none" (file tools error
     outside .swival/, so the editing rules are unreachable). The post-template
     "Filesystem access is restricted" sentence still gets appended.
+    {{SUBAGENT_GUIDANCE}}: dropped when subagents is False.
     """
     memory_block = "" if no_memory else _MEMORY_GUIDANCE_BLOCK
     editing_block = "" if files_mode == "none" else _EDITING_GUIDANCE_BLOCK
-    return system_content.replace("{{MEMORY_GUIDANCE}}", memory_block).replace(
-        "{{EDITING_GUIDANCE}}", editing_block
+    subagent_block = _SUBAGENT_GUIDANCE_BLOCK if subagents else ""
+    return (
+        system_content.replace("{{MEMORY_GUIDANCE}}", memory_block)
+        .replace("{{EDITING_GUIDANCE}}", editing_block)
+        .replace("{{SUBAGENT_GUIDANCE}}", subagent_block)
     )
 
 
@@ -5704,6 +5717,7 @@ def build_system_prompt(
     files_mode: str = "some",
     start_dir: "Path | None" = None,
     metaskill_names: list[str] | None = None,
+    subagents: bool = False,
 ) -> tuple[str | None, list[str]]:
     """Assemble full system prompt with instructions, date, skills, memory.
 
@@ -5739,7 +5753,10 @@ def build_system_prompt(
     else:
         system_content = DEFAULT_SYSTEM_PROMPT_FILE.read_text(encoding="utf-8")
         system_content = _apply_capability_substitutions(
-            system_content, no_memory=no_memory, files_mode=files_mode
+            system_content,
+            no_memory=no_memory,
+            files_mode=files_mode,
+            subagents=subagents,
         )
         if not no_instructions:
             instructions, instructions_loaded = load_instructions(
@@ -6211,6 +6228,7 @@ def _run_main(args, report, _write_report, parser):
         files_mode=files_mode,
         start_dir=start_dir,
         metaskill_names=_metaskill_names,
+        subagents=_subagents,
     )
     policy: _InteractionPolicy = "interactive" if args.repl else "autonomous"
     if system_content is not None:

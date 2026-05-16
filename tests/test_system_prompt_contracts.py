@@ -32,15 +32,16 @@ def _read_prompt(
     *,
     no_memory: bool = False,
     files_mode: str = "some",
+    subagents: bool = False,
 ) -> str:
     """Return the assembled prompt the way build_system_prompt() would.
 
-    Defaults match the common-case ("memory on, file tools usable"), so the
-    hard-contract tests below see the full default prompt.
+    Defaults match the common-case ("memory on, file tools usable, no
+    subagents"), so the hard-contract tests below see the full default prompt.
     """
     raw = DEFAULT_SYSTEM_PROMPT_FILE.read_text(encoding="utf-8")
     raw = _apply_capability_substitutions(
-        raw, no_memory=no_memory, files_mode=files_mode
+        raw, no_memory=no_memory, files_mode=files_mode, subagents=subagents
     )
     return _apply_interaction_policy(raw, policy)
 
@@ -252,16 +253,23 @@ class TestInteractionPolicySubstitution:
             assert "think" in text
 
     def test_no_unsubstituted_capability_placeholders(self):
-        # All four flag combinations must produce a fully-substituted prompt.
+        # All flag combinations must produce a fully-substituted prompt.
         for no_memory in (False, True):
             for files_mode in ("some", "all", "none"):
-                text = _read_prompt(no_memory=no_memory, files_mode=files_mode)
-                assert "{{MEMORY_GUIDANCE}}" not in text, (
-                    f"MEMORY_GUIDANCE leaked with no_memory={no_memory}, files_mode={files_mode}"
-                )
-                assert "{{EDITING_GUIDANCE}}" not in text, (
-                    f"EDITING_GUIDANCE leaked with no_memory={no_memory}, files_mode={files_mode}"
-                )
+                for sa in (False, True):
+                    text = _read_prompt(
+                        no_memory=no_memory, files_mode=files_mode, subagents=sa
+                    )
+                    tag = f"no_memory={no_memory}, files_mode={files_mode}, subagents={sa}"
+                    assert "{{MEMORY_GUIDANCE}}" not in text, (
+                        f"MEMORY_GUIDANCE leaked with {tag}"
+                    )
+                    assert "{{EDITING_GUIDANCE}}" not in text, (
+                        f"EDITING_GUIDANCE leaked with {tag}"
+                    )
+                    assert "{{SUBAGENT_GUIDANCE}}" not in text, (
+                        f"SUBAGENT_GUIDANCE leaked with {tag}"
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -323,4 +331,38 @@ class TestEditingGate:
         # Sanity: the contract regexes above all run against _read_prompt()
         # with defaults. This test pins the default tuple so a future change
         # to defaults can't silently weaken the hard-contract coverage.
-        assert _read_prompt() == _read_prompt(no_memory=False, files_mode="some")
+        assert _read_prompt() == _read_prompt(
+            no_memory=False, files_mode="some", subagents=False
+        )
+
+
+class TestSubagentGate:
+    def test_subagent_guidance_present_when_enabled(self):
+        text = _read_prompt(subagents=True)
+        assert "spawn_subagent" in text, (
+            "spawn_subagent guidance missing when subagents enabled"
+        )
+        assert "check_subagents" in text, (
+            "check_subagents guidance missing when subagents enabled"
+        )
+
+    def test_subagent_guidance_absent_by_default(self):
+        text = _read_prompt(subagents=False)
+        assert "spawn_subagent" not in text, (
+            "spawn_subagent guidance must not appear when subagents disabled"
+        )
+        assert "check_subagents" not in text, (
+            "check_subagents guidance must not appear when subagents disabled"
+        )
+
+    def test_subagent_named_with_trigger(self):
+        text = _read_prompt(subagents=True)
+        triggers = [
+            r"\bparallel\b",
+            r"\bindependent\b",
+            r"\bconcurrent",
+            r"\bseparable\b",
+        ]
+        assert _has_within(text, "spawn_subagent", triggers), (
+            "`spawn_subagent` must appear close to a when-to-use trigger"
+        )
