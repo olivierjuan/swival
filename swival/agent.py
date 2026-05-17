@@ -10289,6 +10289,7 @@ def repl_loop(
         complete_while_typing=False,
         key_bindings=kb,
         prompt_continuation="    ... ",
+        mouse_support=True,
     )
     prompt_text = FormattedText([("class:prompt", "swival> ")])
 
