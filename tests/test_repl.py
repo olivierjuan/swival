@@ -405,6 +405,86 @@ class TestReplLoop:
         assert kwargs["prompt_continuation"] == "    ... "
         assert kwargs.get("multiline", False) is not True
 
+    def test_bottom_toolbar_shows_context_and_tokens(self, tmp_path):
+        """Toolbar shows token spend and context utilization."""
+        from swival.report import ReportCollector
+
+        report = ReportCollector()
+        report.record_llm_call(1, 0.5, 2500, "stop")
+        report.record_llm_call(2, 0.3, 1800, "stop")
+
+        mock_session = self._mock_session(["/exit"])
+
+        with (
+            patch(
+                "prompt_toolkit.PromptSession", return_value=mock_session
+            ) as mock_cls,
+            patch("swival.agent.run_agent_loop"),
+            patch("swival.agent.estimate_tokens", return_value=42),
+            patch("subprocess.check_output", return_value=b""),
+        ):
+            repl_loop(
+                [],
+                [],
+                **_loop_kwargs(
+                    tmp_path, max_turns=25, context_length=100, report=report
+                ),
+            )
+            _, kwargs = mock_cls.call_args
+            toolbar_text = "".join(text for _style, text in kwargs["bottom_toolbar"]())
+
+        assert "4k tok" in toolbar_text
+        assert "ctx 42%" in toolbar_text
+
+    def test_bottom_toolbar_shows_only_contextual_state(self, tmp_path):
+        """Toolbar shows git dirty, todo, goal, elapsed; omits static info."""
+        from swival.goal import GoalState
+        from swival.tracker import FileAccessTracker
+
+        todo = TodoState(verbose=False)
+        todo.process({"action": "add", "tasks": ["a", "b", "c"]})
+        goal = GoalState(verbose=False)
+        objective = "Ship the contextual toolbar without static session noise"
+        goal.create(objective)
+        tracker = FileAccessTracker()
+        for idx in range(7):
+            tracker.record_write(f"file{idx}.py")
+
+        mock_session = self._mock_session(["/exit"])
+        git_porcelain = b" M foo.py\n M bar.py\n?? new.txt\n"
+        with (
+            patch(
+                "prompt_toolkit.PromptSession", return_value=mock_session
+            ) as mock_cls,
+            patch("swival.agent.run_agent_loop"),
+            patch("swival.agent.estimate_tokens", return_value=42),
+            patch("subprocess.check_output", return_value=git_porcelain),
+            patch("time.time", side_effect=[0.0, 90.0]),
+        ):
+            repl_loop(
+                [],
+                [],
+                **_loop_kwargs(
+                    tmp_path,
+                    max_turns=25,
+                    context_length=100,
+                    todo_state=todo,
+                    goal_state=goal,
+                    file_tracker=tracker,
+                ),
+            )
+            _, kwargs = mock_cls.call_args
+            toolbar_parts = kwargs["bottom_toolbar"]()
+            toolbar_text = "".join(text for _style, text in toolbar_parts)
+
+        assert ("class:bottom-toolbar.key", "3 changed") in toolbar_parts
+        assert ("class:bottom-toolbar.key", "3 todo") in toolbar_parts
+        assert ("class:bottom-toolbar.model", objective[:37] + "...") in toolbar_parts
+        assert "1m30s" in toolbar_text
+        assert "test-model" not in toolbar_text
+        assert "lmstudio" not in toolbar_text
+        assert "some" not in toolbar_text
+
     def test_exit_command(self, tmp_path):
         """Feeding /exit exits the loop without error."""
         messages = [_sys("system")]

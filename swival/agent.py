@@ -10254,10 +10254,12 @@ def repl_loop(
 ):
     """Interactive read-eval-print loop."""
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.filters import is_done
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style
+    from prompt_toolkit.widgets.base import Border
 
     from .completer import SwivalCompleter
 
@@ -10272,6 +10274,11 @@ def repl_loop(
         {
             "": "ansicyan",
             "prompt": "bold ansigreen",
+            "frame.border": "ansicyan",
+            "bottom-toolbar": "noreverse bg:ansibrightblack ansiwhite",
+            "bottom-toolbar.key": "bold ansiyellow",
+            "bottom-toolbar.model": "ansicyan",
+            "bottom-toolbar.tip": "italic ansibrightblack",
         }
     )
     completer = SwivalCompleter(skills_catalog=skills_catalog)
@@ -10281,16 +10288,148 @@ def repl_loop(
     def _insert_newline(event):
         event.current_buffer.insert_text("\n")
 
-    session = PromptSession(
-        history=_SafeFileHistory(history_path),
-        enable_history_search=True,
-        style=prompt_style,
-        completer=completer,
-        complete_while_typing=False,
-        key_bindings=kb,
-        prompt_continuation="    ... ",
-        mouse_support=True,
+    turn_state = {"max_turns": max_turns, "turns_used": 0}
+    _context_limit = context_length or 128000
+    _toolbar_tips = [
+        "^J newline │ @ file │ / commands │ ! shell",
+        "/compact to free context │ /status for session info",
+        "@ to attach files │ /add-dir to expand workspace",
+        "/goal to set an objective │ /todo to track work items",
+        "/save before risky changes │ /restore to roll back",
+        "/copy to copy last answer to clipboard",
+        "^R to search history │ ^J for multiline input",
+        "pipe input: echo 'task' | swival │ output goes to stdout",
+        "/clear to start fresh │ /continue to reset turn counter",
+        "/profile to switch models mid-session",
+        "/remember to persist a project fact to AGENTS.md",
+        "/learn to review mistakes and save lessons",
+        "/init to auto-detect project conventions",
+        "!! cmd runs a shell command without the LLM",
+        "/extend to double turn limit when running out",
+        "/tools to see all available tools",
+        "/audit to run a security review on your code",
+        "/simplify to refactor and reduce complexity",
+        "/add-dir-ro for read-only access to reference code",
+        "/loop 5m prompt to repeat a task on an interval",
+    ]
+    random.shuffle(_toolbar_tips)
+    _toolbar_state = {
+        "git_dirty": 0,
+        "elapsed_start": time.time(),
+        "tip_idx": 0,
+        "ctx_pct": 0,
+        "total_tok": 0,
+    }
+
+    def _refresh_toolbar_state():
+        try:
+            out = subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                cwd=base_dir,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+            _toolbar_state["git_dirty"] = len(
+                [ln for ln in out.decode().splitlines() if ln.strip()]
+            )
+        except Exception:
+            _toolbar_state["git_dirty"] = 0
+        ctx_tokens = estimate_tokens(messages, tools)
+        _toolbar_state["ctx_pct"] = min(100, int(ctx_tokens * 100 / _context_limit))
+        if report:
+            _toolbar_state["total_tok"] = sum(
+                e.get("prompt_tokens_est", 0)
+                for e in report.events
+                if e.get("type") == "llm_call"
+            )
+        _toolbar_state["tip_idx"] += 1
+
+    _refresh_toolbar_state()
+
+    _S = "class:bottom-toolbar"
+    _S_KEY = "class:bottom-toolbar.key"
+    _S_MODEL = "class:bottom-toolbar.model"
+    _S_TIP = "class:bottom-toolbar.tip"
+
+    def _bottom_toolbar():
+        parts = []
+        total_tok = _toolbar_state["total_tok"]
+        if report:
+            if total_tok >= 1000:
+                parts.append((_S, f" {total_tok // 1000}k tok"))
+            else:
+                parts.append((_S, f" {total_tok} tok"))
+        parts.append((_S, f" │ ctx {_toolbar_state['ctx_pct']}%"))
+
+        dirty = _toolbar_state["git_dirty"]
+        if dirty:
+            parts.append((_S, " │ "))
+            parts.append((_S_KEY, f"{dirty} changed"))
+
+        if subagent_manager:
+            running = subagent_manager.running_count
+            if running:
+                parts.append((_S, " │ "))
+                parts.append((_S_KEY, f"{running} agent{'s' if running > 1 else ''}"))
+
+        remaining = todo_state.remaining_count
+        if remaining:
+            parts.append((_S, " │ "))
+            parts.append((_S_KEY, f"{remaining} todo"))
+
+        has_goal = goal_state and goal_state.has_active()
+        if has_goal:
+            objective = goal_state.current.objective
+            if len(objective) > 40:
+                objective = objective[:37] + "..."
+            parts.append((_S, " │ "))
+            parts.append((_S_MODEL, objective))
+
+        elapsed = int(time.time() - _toolbar_state["elapsed_start"])
+        if elapsed >= 60:
+            parts.append((_S, f" │ {elapsed // 60}m{elapsed % 60:02d}s"))
+
+        # Rotating tip when toolbar is sparse
+        has_contextual = dirty or remaining or has_goal or elapsed >= 60
+        if not has_contextual:
+            tip = _toolbar_tips[_toolbar_state["tip_idx"] % len(_toolbar_tips)]
+            parts.append((_S, " │ "))
+            parts.append((_S_TIP, tip))
+        return parts
+
+    _border_saved = (
+        Border.VERTICAL,
+        Border.TOP_LEFT,
+        Border.TOP_RIGHT,
+        Border.BOTTOM_LEFT,
+        Border.BOTTOM_RIGHT,
     )
+    Border.VERTICAL = " "
+    Border.TOP_LEFT = "─"
+    Border.TOP_RIGHT = "─"
+    Border.BOTTOM_LEFT = "─"
+    Border.BOTTOM_RIGHT = "─"
+    try:
+        session = PromptSession(
+            history=_SafeFileHistory(history_path),
+            enable_history_search=True,
+            style=prompt_style,
+            completer=completer,
+            complete_while_typing=False,
+            key_bindings=kb,
+            prompt_continuation="    ... ",
+            mouse_support=False,
+            show_frame=~is_done,
+            bottom_toolbar=_bottom_toolbar,
+        )
+    finally:
+        (
+            Border.VERTICAL,
+            Border.TOP_LEFT,
+            Border.TOP_RIGHT,
+            Border.BOTTOM_LEFT,
+            Border.BOTTOM_RIGHT,
+        ) = _border_saved
     prompt_text = FormattedText([("class:prompt", "swival> ")])
 
     fmt.reset_state()
@@ -10302,7 +10441,6 @@ def repl_loop(
     if verbose:
         fmt.repl_banner()
 
-    turn_state = {"max_turns": max_turns, "turns_used": 0}
     loop_registry = LoopRegistry()
     _repl_loop_kwargs = dict(
         api_base=api_base,
@@ -10417,6 +10555,8 @@ def repl_loop(
                     fmt.warning(result.text)
                 else:
                     fmt.info(result.text)
+
+            _refresh_toolbar_state()
 
             if result.stop:
                 break

@@ -194,6 +194,11 @@ class SubagentManager:
         self._lock = threading.Lock()
         self._slots = threading.Semaphore(_MAX_CONCURRENT)
 
+    @property
+    def running_count(self) -> int:
+        with self._lock:
+            return sum(1 for h in self._handles.values() if not h.done.is_set())
+
     def spawn(
         self,
         task: str,
