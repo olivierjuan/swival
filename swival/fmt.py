@@ -2,6 +2,7 @@
 
 import contextlib
 import difflib
+import math
 import threading
 import time
 
@@ -181,6 +182,23 @@ def llm_spinner(label: str = "Thinking"):
         dismiss()
 
 
+_INPUT_MARQUEE_PREFIX = "  > "
+_INPUT_MARQUEE_SEPARATOR = "   ·   "
+
+
+def _input_marquee_text(text: str, offset: int, width: int) -> Text:
+    flat = " ".join(text.split()) or "Thinking"
+    base = flat + _INPUT_MARQUEE_SEPARATOR
+    content_width = max(width - len(_INPUT_MARQUEE_PREFIX), 20)
+    start = offset % len(base)
+    repeats = math.ceil((start + content_width) / len(base)) + 1
+    tiled = base * repeats
+
+    line = Text(_INPUT_MARQUEE_PREFIX, style="bold cyan")
+    line.append(tiled[start : start + content_width], style="cyan")
+    return line
+
+
 @contextlib.contextmanager
 def input_marquee(text: str):
     """Context manager showing a scrolling marquee of ``text`` on stderr.
@@ -192,16 +210,8 @@ def input_marquee(text: str):
         yield _noop
         return
 
-    flat = " ".join(text.split())
-    base = flat + "   ·   "
-    width = max(_console.width - 6, 20)
-    buffer = base + base[:width]
-
     def _frame(offset: int) -> Text:
-        start = offset % len(base)
-        line = Text("  > ", style="bold cyan")
-        line.append(buffer[start : start + width], style="cyan")
-        return line
+        return _input_marquee_text(text, offset, _console.width)
 
     stop = threading.Event()
     dismissed = threading.Event()

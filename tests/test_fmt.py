@@ -74,6 +74,26 @@ class TestLlmSpinner:
         assert "Custom label" in buf.getvalue()
 
 
+class TestInputMarquee:
+    def test_short_prompt_fills_line_width(self):
+        line = fmt._input_marquee_text("yo", offset=0, width=40)
+
+        assert line.plain.startswith("  > yo")
+        assert len(line.plain) == 40
+        assert line.plain.count("yo") > 1
+
+    def test_blank_prompt_has_fallback_text(self):
+        line = fmt._input_marquee_text("   ", offset=0, width=40)
+
+        assert line.plain.startswith("  > Thinking")
+        assert len(line.plain) == 40
+
+    def test_large_offset_still_fills_line_width(self):
+        line = fmt._input_marquee_text("yo", offset=1_000_000, width=40)
+
+        assert len(line.plain) == 40
+
+
 class TestCompletion:
     def test_ok(self):
         out = _capture(fmt.completion, 5, "ok")
