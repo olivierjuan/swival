@@ -279,7 +279,7 @@ class TestLineNumberTargeting:
 
     def test_candidate_lines_capped(self):
         content = "\n".join("aaa" for _ in range(10)) + "\n"
-        with pytest.raises(ValueError, match=r"\.\.\.$"):
+        with pytest.raises(ValueError, match=r"\.\.\."):
             replace(content, "aaa", "XXX", line_number=100)
 
 
@@ -304,6 +304,83 @@ class TestExactMatchSpans:
         spans = _exact_match_spans("aaaa", "aa")
         assert len(spans) == 2
         assert spans == [(0, 2), (2, 4)]
+
+
+# =========================================================================
+# Rich error feedback: closest-match enrichment when old_string is missing
+# =========================================================================
+
+
+class TestClosestMatchFeedback:
+    """When old_string isn't found, the error names the most similar line."""
+
+    def test_typo_single_line_includes_closest(self):
+        content = "def greet(name):\n    print('hello, ' + name)\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(content, "    print('helo, ' + name)", "    print('hi, ' + name)")
+        msg = str(excinfo.value)
+        assert "old_string not found" in msg
+        assert "closest line in file" in msg
+        assert "line 2" in msg
+        assert "    print('hello, ' + name)" in msg
+
+    def test_whitespace_mismatch_single_line(self):
+        content = "if x:\n    return x + y\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(content, "    return x+y", "    return x + y + 1")
+        msg = str(excinfo.value)
+        assert "closest line in file" in msg
+        assert "line 2" in msg
+
+    def test_multiline_window_closest(self):
+        content = "def f():\n    a = 1\n    b = 2\n    return a + b\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(
+                content,
+                "def f():\n    a = 1\n    b = 3",
+                "def f():\n    return 99",
+            )
+        msg = str(excinfo.value)
+        assert "closest window in file" in msg
+        assert "lines 1-3" in msg
+
+    def test_no_close_match_omits_block(self):
+        content = "hello world\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(content, "xyzzy plover", "wow")
+        msg = str(excinfo.value)
+        assert "old_string not found" in msg
+        assert "No close match was found" in msg
+        assert "closest" not in msg.lower().split("no close match")[0]
+
+    def test_multiple_matches_lists_snippets(self):
+        content = "aaa one\nbbb\naaa two\nccc\naaa three\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(content, "aaa", "XXX")
+        msg = str(excinfo.value)
+        assert "multiple matches (3 found)" in msg
+        assert "matches at:" in msg
+        assert "line 1:" in msg
+        assert "line 3:" in msg
+        assert "line 5:" in msg
+        assert "'aaa one'" in msg
+
+    def test_multiple_matches_caps_at_five_snippets(self):
+        content = "\n".join(f"row {i} aaa" for i in range(10)) + "\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(content, "aaa", "X")
+        msg = str(excinfo.value)
+        assert "multiple matches (10 found)" in msg
+        assert "and 5 more" in msg
+
+    def test_line_target_miss_lists_alternatives(self):
+        content = "alpha\nbeta\nalpha\n"
+        with pytest.raises(ValueError) as excinfo:
+            replace(content, "alpha", "X", line_number=2)
+        msg = str(excinfo.value)
+        assert "no match at line 2" in msg
+        assert "1, 3" in msg
+        assert "Pass one of those line numbers" in msg
 
 
 # =========================================================================

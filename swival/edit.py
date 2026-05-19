@@ -7,6 +7,7 @@ then Unicode-normalized.
 
 from __future__ import annotations
 
+import difflib
 import re
 
 
@@ -186,6 +187,134 @@ def _replace_all_fuzzy(
 # ---------------------------------------------------------------------------
 
 _MAX_CANDIDATE_LINES = 5
+_CLOSEST_MATCH_RATIO_THRESHOLD = 0.55
+_CLOSEST_MATCH_LINE_DISPLAY_CAP = 200
+_CLOSEST_MATCH_MAX_FILE_LINES = 5000
+
+
+def _truncate_display(s: str, cap: int = _CLOSEST_MATCH_LINE_DISPLAY_CAP) -> str:
+    return s if len(s) <= cap else s[:cap] + "…"
+
+
+def _closest_single_line_match(
+    content: str, old_string: str
+) -> tuple[int, str, float] | None:
+    """Find the line in *content* most similar to *old_string*.
+
+    Returns (1-based line number, line content, similarity ratio) or None
+    when *old_string* is multi-line, when the file has no non-empty lines,
+    or when the best similarity is below the threshold.
+
+    Uses quick_ratio() as a cheap gate before the O(n*m) ratio() call, and
+    skips entirely on files larger than _CLOSEST_MATCH_MAX_FILE_LINES so
+    the error path stays bounded.
+    """
+    if "\n" in old_string:
+        return None
+    needle = old_string.strip()
+    if not needle:
+        return None
+    content_lines = content.split("\n")
+    if len(content_lines) > _CLOSEST_MATCH_MAX_FILE_LINES:
+        return None
+    best: tuple[int, str, float] | None = None
+    matcher = difflib.SequenceMatcher(a=needle, autojunk=False)
+    threshold = _CLOSEST_MATCH_RATIO_THRESHOLD
+    for i, line in enumerate(content_lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        matcher.set_seq2(stripped)
+        if matcher.quick_ratio() < threshold:
+            continue
+        ratio = matcher.ratio()
+        if best is None or ratio > best[2]:
+            best = (i, line, ratio)
+    if best is None or best[2] < threshold:
+        return None
+    return best
+
+
+def _closest_window_match(
+    content: str, old_string: str
+) -> tuple[int, list[str], float] | None:
+    """Find the line window in *content* most similar to a multi-line *old_string*.
+
+    Returns (1-based start line, window lines, similarity ratio) or None
+    when *old_string* is single-line, when the file is shorter than the
+    window, or when the best similarity is below the threshold.
+
+    Strips lines once up front, gates each window with quick_ratio(), and
+    skips files larger than _CLOSEST_MATCH_MAX_FILE_LINES.
+    """
+    old_lines = old_string.split("\n")
+    if len(old_lines) < 2:
+        return None
+    content_lines = content.split("\n")
+    if len(content_lines) < len(old_lines):
+        return None
+    if len(content_lines) > _CLOSEST_MATCH_MAX_FILE_LINES:
+        return None
+    stripped_lines = [line.strip() for line in content_lines]
+    needle = "\n".join(line.strip() for line in old_lines)
+    matcher = difflib.SequenceMatcher(a=needle, autojunk=False)
+    best: tuple[int, list[str], float] | None = None
+    threshold = _CLOSEST_MATCH_RATIO_THRESHOLD
+    window_size = len(old_lines)
+    for i in range(len(content_lines) - window_size + 1):
+        hay = "\n".join(stripped_lines[i : i + window_size])
+        matcher.set_seq2(hay)
+        if matcher.quick_ratio() < threshold:
+            continue
+        ratio = matcher.ratio()
+        if best is None or ratio > best[2]:
+            best = (i + 1, content_lines[i : i + window_size], ratio)
+    if best is None or best[2] < threshold:
+        return None
+    return best
+
+
+def _format_closest_match_block(old_string: str, content: str) -> str:
+    """Build a human-readable error tail describing the closest match.
+
+    Returns an empty string when no close-enough match exists.
+    """
+    if "\n" in old_string:
+        m = _closest_window_match(content, old_string)
+        if m is None:
+            return ""
+        start, window, ratio = m
+        end = start + len(window) - 1
+        old_lines = old_string.split("\n")
+        body_lines = [
+            f"closest window in file (lines {start}-{end}, similarity {ratio:.2f}):",
+            "  your old_string:",
+        ]
+        for line in old_lines:
+            body_lines.append("    " + _truncate_display(line))
+        body_lines.append("  actual in file:")
+        for line in window:
+            body_lines.append("    " + _truncate_display(line))
+        return "\n" + "\n".join(body_lines)
+    m = _closest_single_line_match(content, old_string)
+    if m is None:
+        return ""
+    line_no, actual, ratio = m
+    return (
+        f"\nclosest line in file (line {line_no}, similarity {ratio:.2f}):"
+        f"\n  your old_string: {_truncate_display(old_string)!r}"
+        f"\n  actual in file:  {_truncate_display(actual)!r}"
+    )
+
+
+def _line_snippet_at(content: str, offset: int, cap: int = 80) -> str:
+    """Return the line containing *offset* as a short display snippet."""
+    nl_before = content.rfind("\n", 0, offset)
+    nl_after = content.find("\n", offset)
+    start = nl_before + 1 if nl_before != -1 else 0
+    end = nl_after if nl_after != -1 else len(content)
+    line = content[start:end]
+    return _truncate_display(line, cap)
 
 
 def _filter_by_line(
@@ -314,19 +443,50 @@ def replace(
         if len(spans) == 1:
             return _replace_span(content, spans[0], new_string, old_string)
 
-        all_candidate_lines.extend(_span_lines(content, s, e)[0] for s, e in spans)
+        if pass_name == "exact":
+            full_spans = spans
+        else:
+            full_spans = _fuzzy_match_spans(content, old_string, normalize=normalize)
+        line_nos = [_span_lines(content, s, e)[0] for s, e in full_spans]
+        all_candidate_lines.extend(line_nos)
+        snippet_pairs = [
+            (n, _line_snippet_at(content, s))
+            for n, (s, _e) in zip(line_nos, full_spans)
+        ]
+        shown = snippet_pairs[:_MAX_CANDIDATE_LINES]
+        extra = len(snippet_pairs) - len(shown)
+        snippet_block = "\nmatches at:\n" + "\n".join(
+            f"  line {n}: {text!r}" for n, text in shown
+        )
+        if extra > 0:
+            snippet_block += f"\n  ... and {extra} more"
         raise ValueError(
-            "multiple matches; add line_number from read_file to target one match, "
-            "or set replace_all=true"
+            f"multiple matches ({len(full_spans)} found); add line_number "
+            "from read_file to target one match, or set replace_all=true."
+            + snippet_block
         )
 
     if line_number is not None and any_candidates_found:
         raise ValueError(
             f"no match at line {line_number}; "
-            f"matches found at lines {_format_candidate_lines(all_candidate_lines)}"
+            f"matches found at lines {_format_candidate_lines(all_candidate_lines)}. "
+            "Pass one of those line numbers, or reread the section."
         )
 
+    base = (
+        "old_string not found. The file's whitespace, casing, or punctuation "
+        "may differ from what you sent."
+    )
+    closest = _format_closest_match_block(old_string, content)
+    if closest:
+        raise ValueError(
+            base
+            + " A near-match is shown below. If it is the intended target, retry "
+            "with the actual text from the file. Otherwise reread the relevant section."
+            + closest
+        )
     raise ValueError(
-        "old_string not found; re-read the file with read_file to verify the exact text "
-        "(whitespace, casing, and line endings must match)"
+        base
+        + " No close match was found in the file; reread it with read_file to "
+        "verify the exact text."
     )
