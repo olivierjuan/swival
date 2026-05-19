@@ -23,11 +23,9 @@ TOOLS = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read the contents of a file or list a directory. "
-                "For files, returns lines prefixed with line numbers. "
-                "Use offset/limit to paginate forward, or tail=N to start from the last N lines. "
-                "If output is truncated, a continuation hint shows the offset for the next page. "
-                "For directories, returns a listing with / suffix for subdirectories."
+                "Read a file as numbered lines. Use offset/limit to paginate "
+                "forward, or tail_lines=N for the file end. Truncated output "
+                "shows the next offset. Also lists directories."
             ),
             "parameters": {
                 "type": "object",
@@ -70,11 +68,10 @@ TOOLS = [
         "function": {
             "name": "read_multiple_files",
             "description": (
-                "Read multiple files in one call. Returns line-numbered contents "
-                "grouped by file. Each file can have its own offset/limit/tail. "
-                "Per-file errors are reported inline without failing the batch. "
-                "Use this instead of multiple read_file calls when you already "
-                "know which files you need."
+                "Prefer this over multiple read_file calls when you know which "
+                "files you need. Reads a batch, each with optional "
+                "offset/limit/tail_lines. Per-file errors are inline; the batch "
+                "never fails as a whole."
             ),
             "parameters": {
                 "type": "object",
@@ -125,8 +122,8 @@ TOOLS = [
         "function": {
             "name": "write_file",
             "description": (
-                "Create or overwrite a file. Parent directories are created automatically. "
-                "Either provide content to write, or move_from to atomically rename a file — not both."
+                "Create or overwrite a file with content, or atomically rename "
+                "move_from to file_path (not both). Parent directories are created."
             ),
             "parameters": {
                 "type": "object",
@@ -156,9 +153,8 @@ TOOLS = [
         "function": {
             "name": "edit_file",
             "description": (
-                "Make a targeted edit to an existing file by replacing old_string with new_string. "
-                "Prefer this over write_file for modifications. "
-                "For creating new files, use write_file instead."
+                "Replace old_string with new_string in an existing file. "
+                "Prefer over write_file for edits."
             ),
             "parameters": {
                 "type": "object",
@@ -197,9 +193,7 @@ TOOLS = [
         "function": {
             "name": "list_files",
             "description": (
-                "Recursively list files matching a glob pattern. "
-                "Returns paths sorted by modification time (newest first), "
-                "relative to the base directory."
+                "Recursively list files matching a glob, relative to the base directory."
             ),
             "parameters": {
                 "type": "object",
@@ -229,9 +223,8 @@ TOOLS = [
         "function": {
             "name": "grep",
             "description": (
-                "Search file contents for a regex pattern. "
-                "Returns matches grouped by file with line numbers, "
-                "sorted by file modification time (newest first)."
+                "Search file contents with a Python regex. Returns matches "
+                "grouped by file with line numbers."
             ),
             "parameters": {
                 "type": "object",
@@ -278,9 +271,8 @@ TOOLS = [
         "function": {
             "name": "think",
             "description": (
-                "Think step-by-step before acting. This is your scratchpad for reasoning — "
-                "use it to plan, debug, weigh alternatives, or track what you've learned. "
-                "Using think before complex actions leads to better outcomes."
+                "Private scratchpad for planning, debugging, or weighing "
+                "alternatives. Use before complex actions."
             ),
             "parameters": {
                 "type": "object",
@@ -357,10 +349,8 @@ TOOLS = [
         "function": {
             "name": "todo",
             "description": (
-                "Manage a persistent checklist. Use this to track work items as you "
-                "discover them and mark them done as you complete them. Prefer this "
-                "over mental checklists for multi-step work. Every action "
-                "returns the current list. The list survives context compaction."
+                "Persistent checklist for multi-step work. Add items as discovered, "
+                "mark done as completed. Survives context compaction."
             ),
             "parameters": {
                 "type": "object",
@@ -398,12 +388,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "view_image",
-            "description": (
-                "View an image file from the filesystem. "
-                "You cannot see images without this tool — "
-                "read_file does not work on image files. "
-                "Supports PNG, JPEG, GIF, WebP, and BMP."
-            ),
+            "description": ("View an image file (PNG, JPEG, GIF, WebP, BMP)."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -470,11 +455,7 @@ FETCH_URL_TOOL = {
     "type": "function",
     "function": {
         "name": "fetch_url",
-        "description": (
-            "Make an HTTP GET request to a URL on the internet and return the response as markdown, plain text, or raw HTML. "
-            "This tool has full internet access. Use it to browse websites, read online documentation, "
-            "search the web, or access any HTTP/HTTPS resource on the internet."
-        ),
+        "description": ("GET an HTTP/HTTPS URL, returned as markdown, text, or html."),
         "parameters": {
             "type": "object",
             "properties": {
@@ -507,10 +488,9 @@ SNAPSHOT_TOOL = {
     "function": {
         "name": "snapshot",
         "description": (
-            "Context management: collapse exploration into a compact summary. "
-            "After reading files, grepping, or investigating, call restore to "
-            "replace the exploration turns with your summary, freeing context. "
-            "Summaries survive compaction."
+            "Collapse prior exploration turns into a compact summary to free "
+            "context. save sets a checkpoint; restore replaces the turns since "
+            "with your summary."
         ),
         "parameters": {
             "type": "object",
@@ -560,10 +540,9 @@ OUTLINE_TOOL = {
     "function": {
         "name": "outline",
         "description": (
-            "Show the structural skeleton of one or more files: classes, functions, "
-            "and top-level declarations with line numbers. No bodies. "
-            "Use this to survey files before reading specific sections. "
-            "Pass file_path for a single file, or files for a batch."
+            "Show classes, functions, and top-level declarations with line "
+            "numbers (no bodies). Survey files before reading specific sections. "
+            "Pass file_path for one file or files for a batch."
         ),
         "parameters": {
             "type": "object",
