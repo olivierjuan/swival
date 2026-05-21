@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import re
@@ -537,45 +538,279 @@ def _order_by_attack_surface(
 
 _IMPORT_RE = re.compile(
     r"(?:"
-    r"^\s*import\s+([\w.]+)"  # Python: import foo.bar
+    # Go/Dart/JS quoted-path imports. Modifier words ahead of the path cover
+    # `import _ "pkg"` (Go blank), `import log "pkg"` (Go alias),
+    # `import api from "./api"` (JS), `import type Foo from "./foo"` (TS).
+    r"^\s*import\s+(?:[\w.]+\s+)*['\"]([^'\"]+)['\"]"
+    # JS/TS with `from`. Requires whitespace before `from` so `Array.from(...)`
+    # is not treated as an import. The body excludes quote and backtick
+    # characters so a string or template literal containing the word `from`
+    # does not register as an import.
+    r"|^\s*(?:const|let|var|import|export)\s+[^'\"`\n]*?\sfrom\s+['\"]([^'\"]+)['\"]"
     r"|^\s*from\s+([\w.]+)\s+import"  # Python: from foo import bar
-    r"|^\s*(?:const|let|var|import)\s+.*?from\s+['\"]([^'\"]+)['\"]"  # JS/TS
-    r"|require\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"  # Node require
-    r"|^\s*#include\s*[\"<]([^\"'>]+)[\"'>]"  # C/C++
-    r"|^\s*require\s+['\"]([^'\"]+)['\"]"  # Perl: require "Foo/Bar.pl"
-    r"|^\s*(?:use|require|no)\s+([\w:\\]+)"  # Rust / PHP / Perl
-    r"|@import\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"  # Zig
+    # Python/Java/Kotlin/Scala/Swift/Haskell `import NAME` with optional
+    # language-specific modifiers (Java `static`, Haskell `qualified`/`safe`
+    # which can stack as `import safe qualified ...`, Swift
+    # `struct|class|enum|protocol|typealias|func|var|let`).
+    # `\w+(?:\.\w+)*` is a proper dotted identifier so trailing `.*` in
+    # `import static java.lang.Math.*` doesn't capture a trailing dot.
+    r"|^\s*import\s+(?:(?:static|qualified|safe|struct|class|enum|protocol|typealias|func|var|let)\s+){0,3}(\w+(?:\.\w+)*)"
+    r"|require\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"  # Node require()
+    r"|^\s*#include\s*(?:\"([^\"]+)\"|<([^>]+)>)"  # C/C++
+    r"|^\s*using\s+(?:static\s+|namespace\s+)?([\w.]+)\s*;"  # C# / C++ using
+    r"|^\s*require\s+['\"]([^'\"]+)['\"]"  # Perl/Ruby/Lua: require "X"
+    r"|^\s*(?:use|require|no)\s+([\w:\\]+)"  # Rust/PHP/Perl
+    # Zig `@import(...)`. Match anywhere on a line; the post-filter in
+    # `_extract_imports` discards matches whose `@` lands inside a string
+    # literal span or on a Zig multiline-string line (`\\...`).
+    r"|@import\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"
     r")",
     re.MULTILINE,
 )
+
+_GO_IMPORT_BLOCK_RE = re.compile(r"^\s*import\s*\((.*?)\)", re.DOTALL | re.MULTILINE)
+_GO_IMPORT_STR_RE = re.compile(r'(?:[\w.]+\s+)?"([^"]+)"')
 
 _EXPORT_RE = re.compile(
     r"(?:"
-    r"^def\s+(\w+)"  # Python def
-    r"|^class\s+(\w+)"  # Python class
-    r"|^export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)"  # JS/TS
-    r"|^func\s+(\w+)"  # Go
-    r"|^pub\s+fn\s+(\w+)"  # Rust/Zig
-    r"|^\s*(?:public\s+)?function\s+(\w+)"  # PHP
+    # Python `def foo` / Ruby `def self.foo` or `def Cls.foo`.
+    r"^def\s+(?:\w+\.)?(\w+)"
+    # class declaration with up to 6 modifier words (public, abstract, data, ...).
+    r"|^\s*(?:\w+\s+){0,6}class\s+(\w+)"
+    r"|^export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)"  # JS/TS export
+    # function/func/fun with modifier words ahead (public, async, suspend, static, ...).
+    r"|^\s*(?:\w+\s+){0,6}(?:function|func|fun)\s+(\w+)"
+    # Rust/Zig `pub`. Optional `pub(crate)`/`pub(in path)`/`pub(super)` visibility,
+    # then up to 4 modifier tokens (`async`, `unsafe`, `const`, `extern "C"`, ...),
+    # then the item kind. Modifier tokens may be a word or a quoted string so
+    # `pub extern "C" fn` works. Greedy count so `pub const fn foo` consumes
+    # `const` as a modifier and `fn` as the kind.
+    r"|^\s*pub(?:\([^)]+\))?\s+(?:(?:\w+|\"[^\"]+\")\s+){0,4}(?:fn|struct|trait|enum|const|static|type|mod|union|var)\s+(\w+)"
     r"|^\s*sub\s+(\w+)"  # Perl sub
-    r"|^\s*package\s+([\w:]+)"  # Perl package
+    r"|^\s*package\s+(\w+(?:::\w+)*)\s*[;{]"  # Perl package
     r")",
     re.MULTILINE,
 )
 
 
+# JS/TS regex literal: `/pattern/flags`. Treated as an opaque span so
+# `import`/`require` text inside the pattern isn't picked up.
+#
+# Two arms separate strong context from weak context:
+#
+# * Strong context — start of input, right after `\n`, after the punctuation
+#   set `=([{,;:?!&|^`, after `=>`, or after a JS keyword that introduces an
+#   expression (`return`, `typeof`). A `/` in these positions is
+#   unambiguously a regex literal, so the pattern may begin with whitespace
+#   and any whitespace between the operator/keyword and `/` is consumed.
+# * Weak context — whitespace alone, or after an arithmetic operator
+#   (`+`, `-`, `*`, `/`, `%`, `~`, `<`, `>`). The `/` is ambiguous (it could
+#   be division), so the `(?!\s)` lookahead rejects patterns starting with
+#   whitespace, which is the shape division-with-call-between-slashes takes
+#   (`a / require('x') / b`).
+# `(?!\*)` after `/` keeps `/* ... */` block comments from being mis-tokenized
+# as a regex starting with `*`. Regex patterns that legitimately begin with
+# `*` are vanishingly rare and accepted as a known gap.
+_REGEX_BODY = r"/(?!\*)(?:[^/\\\n]|\\.)+/[gimsuyd]*"
+# JS expression-introducing keywords that may precede a regex literal. For
+# each, two fixed-width lookbehinds are emitted: `(?<=[^\w.]KEYWORD)` for the
+# common case (keyword preceded by whitespace or punctuation other than `.`)
+# and `(?<=^KEYWORD)` for the start-of-input case. The explicit `[^\w.]`
+# rejects the dot, so member-access shapes like `obj.return /x/` fall
+# through to weak-context handling and don't mask later real imports.
+_JS_REGEX_KEYWORDS: tuple[str, ...] = (
+    "in",
+    "new",
+    "void",
+    "case",
+    "else",
+    "throw",
+    "yield",
+    "await",
+    "return",
+    "typeof",
+    "delete",
+    "instanceof",
+)
+_KEYWORD_LOOKBEHINDS = "|".join(
+    f"(?<=[^\\w.]{kw})|(?<=^{kw})" for kw in _JS_REGEX_KEYWORDS
+)
+
+# `]` lives in the weak set even though it can syntactically precede a
+# regex literal. In real JS, division after an array/property index
+# (`arr[i] / arr[j]`) is overwhelmingly more common than a regex literal
+# starting with whitespace after `]`. The weak arm's `(?!\s)` still allows
+# non-ws regex like `arr[i] /foo/g` to be tokenized correctly.
+_REGEX_LITERAL_RE = (
+    r"(?:"
+    r"(?:"
+    r"(?<=\n)|(?<=^)|"
+    r"(?<=[=(,;:?!&|^\[{}])|"
+    r"(?<==>)|"
+    + _KEYWORD_LOOKBEHINDS
+    + r")\s*"
+    + _REGEX_BODY
+    + r"|(?<=[\s+\-*/%~<>\]])/(?!\s)(?!\*)(?:[^/\\\n]|\\.)+/[gimsuyd]*"
+    r")"
+)
+
+# Opaque-span tokens: triple/single/double/backtick string literals plus the
+# JS regex literal. Shared by `_STRING_LITERAL_RE` (span detection) and
+# `_STRIP_TOKEN_RE` (comment stripping), so both stay in sync.
+_OPAQUE_SPAN_PATTERN = (
+    r'"""[\s\S]*?"""'
+    r"|'''[\s\S]*?'''"
+    r'|"(?:[^"\\]|\\.)*"'
+    r"|'(?:[^'\\]|\\.)*'"
+    r"|`(?:[^`\\]|\\.)*`"
+)
+
+_STRING_LITERAL_RE = re.compile(_OPAQUE_SPAN_PATTERN + r"|" + _REGEX_LITERAL_RE)
+
+# Block/line comments are listed before the regex literal so `/* ... */` and
+# `// ...` are tried first and never mis-tokenized as `/.../`.
+_STRIP_TOKEN_RE = re.compile(
+    _OPAQUE_SPAN_PATTERN + r"|/\*[\s\S]*?\*/" + r"|//[^\n]*" + r"|" + _REGEX_LITERAL_RE
+)
+
+
+def _strip_comments(content: str) -> str:
+    """Remove ``/* ... */`` block comments and ``// ...`` line comments while
+    keeping the contents of string literals untouched.
+
+    Run before regex-based import/export extraction so commented-out
+    declarations (e.g. ``// require('fake')`` or ``/* class Fake {} */``)
+    do not pollute the indices. The matcher consumes string literals first
+    so markers that happen to appear inside ``"..."``, ``'...'``, or
+    backtick strings are kept verbatim. ``#`` is intentionally not stripped
+    because it carries semantic weight in C/C++ (``#include``, ``#define``).
+    """
+
+    def repl(m: re.Match) -> str:
+        text = m.group(0)
+        if text.startswith("/*") or text.startswith("//"):
+            return ""
+        return text
+
+    return _STRIP_TOKEN_RE.sub(repl, content)
+
+
+def _redact_string_contents(content: str) -> str:
+    """Return ``content`` with the interior of every string literal replaced
+    by spaces (newlines preserved, delimiters kept), so position-based
+    secondary scans can ignore code-shaped text trapped inside string
+    literals while leaving byte offsets stable.
+    """
+
+    def repl(m: re.Match) -> str:
+        s = m.group(0)
+        if s.startswith(('"""', "'''")) and len(s) >= 6:
+            delim = s[:3]
+            inner = s[3:-3]
+            return delim + "".join(c if c == "\n" else " " for c in inner) + delim
+        if len(s) < 2:
+            return s
+        inner = s[1:-1]
+        redacted = "".join(c if c == "\n" else " " for c in inner)
+        return s[0] + redacted + s[-1]
+
+    return _STRING_LITERAL_RE.sub(repl, content)
+
+
+_PYTHON_FROM_DOT_IMPORT_RE = re.compile(
+    r"^\s*from\s+(\.+)\s+import\s+([^\n#]+)",
+    re.MULTILINE,
+)
+
+
+def _string_literal_spans(
+    content: str,
+) -> tuple[list[int], list[int]]:
+    """Return parallel ``(starts, ends)`` lists for every opaque span in
+    ``content``, sorted by start position (the natural ``re.finditer`` order).
+    Kept as two lists so :func:`_starts_inside_string` can binary-search."""
+    starts: list[int] = []
+    ends: list[int] = []
+    for m in _STRING_LITERAL_RE.finditer(content):
+        starts.append(m.start())
+        ends.append(m.end())
+    return starts, ends
+
+
+def _starts_inside_string(pos: int, spans: tuple[list[int], list[int]]) -> bool:
+    starts, ends = spans
+    idx = bisect.bisect_right(starts, pos) - 1
+    if idx < 0:
+        return False
+    return starts[idx] < pos < ends[idx] - 1
+
+
+def _is_zig_multiline_string_line(content: str, pos: int) -> bool:
+    """Return True when ``pos`` falls on a Zig multiline-string literal line.
+
+    Zig has no block comments; instead each line of a multiline string starts
+    with ``\\\\``. A match landing on such a line is part of string content,
+    not code.
+    """
+    line_start = content.rfind("\n", 0, pos) + 1
+    prefix = content[line_start:pos].lstrip()
+    return prefix.startswith("\\\\")
+
+
 def _extract_imports(content: str) -> list[str]:
+    no_comments = _strip_comments(content)
+    string_spans = _string_literal_spans(no_comments)
     imports = []
-    for m in _IMPORT_RE.finditer(content):
-        imp = next((g for g in m.groups() if g), None)
-        if imp:
-            imports.append(imp)
+    for m in _IMPORT_RE.finditer(no_comments):
+        if _starts_inside_string(m.start(), string_spans):
+            continue
+        if _is_zig_multiline_string_line(no_comments, m.start()):
+            continue
+        cap_idx = next((i for i, g in enumerate(m.groups(), 1) if g is not None), None)
+        if cap_idx is None:
+            continue
+        # Also probe the byte just before the captured path. For rules like
+        # JS `import x from "./api"` the match begins at line start, so
+        # `m.start()` won't catch a `from` keyword tucked inside a regex
+        # literal on the same line; the character preceding the capture is
+        # the surrounding quote/regex content and reveals that context.
+        cap_start = m.start(cap_idx)
+        if cap_start > 0 and _starts_inside_string(cap_start - 1, string_spans):
+            continue
+        imports.append(m.group(cap_idx))
+    # Python `from . import a, b as c` — capture each imported name prefixed
+    # with the leading dots so the relative-import resolver can find the
+    # sibling module file.
+    for m in _PYTHON_FROM_DOT_IMPORT_RE.finditer(no_comments):
+        dots = m.group(1)
+        names = m.group(2)
+        if "(" in names:
+            names = names.split("(", 1)[1]
+        names = names.replace(")", "")
+        for raw in names.split(","):
+            name = raw.strip().split(" as ")[0].strip().rstrip(",")
+            if name and name != "*" and name.replace("_", "").isalnum():
+                imports.append(f"{dots}{name}")
+    # Mask string interiors before the Go grouped-import scan so an
+    # `import (...)` block trapped inside a raw-string literal (backticks)
+    # is not picked up. Path extraction uses the original buffer via the
+    # matched positions so real quoted paths are still recovered.
+    masked = _redact_string_contents(no_comments)
+    for block_m in _GO_IMPORT_BLOCK_RE.finditer(masked):
+        start, end = block_m.start(1), block_m.end(1)
+        original_block = no_comments[start:end]
+        for s in _GO_IMPORT_STR_RE.finditer(original_block):
+            imports.append(s.group(1))
     return imports
 
 
 def _extract_exports(content: str) -> list[str]:
+    no_comments = _strip_comments(content)
+    string_spans = _string_literal_spans(no_comments)
     exports = []
-    for m in _EXPORT_RE.finditer(content):
+    for m in _EXPORT_RE.finditer(no_comments):
+        if _starts_inside_string(m.start(), string_spans):
+            continue
         sym = next((g for g in m.groups() if g), None)
         if sym and not sym.startswith("_"):
             exports.append(sym)
@@ -702,11 +937,105 @@ def _repo_profile_json(state: AuditRunState) -> str:
 
 _IDENT_RE = re.compile(r"\b\w+\b")
 
+_RELATIVE_IMPORT_EXTS: tuple[str, ...] = (
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".zig",
+    ".dart",
+    ".rs",
+    ".py",
+    ".go",
+)
+_RELATIVE_INDEX_FILES: tuple[str, ...] = (
+    "index.ts",
+    "index.tsx",
+    "index.js",
+    "index.jsx",
+    "mod.rs",
+    "lib.rs",
+    "__init__.py",
+)
+
+
+def _resolve_relative_import(
+    importer: str,
+    imp: str,
+    file_set: set[str],
+    *,
+    importer_ext: str | None = None,
+    importer_dir: str | None = None,
+) -> str | None:
+    """Resolve a relative import string to an actual repo file path.
+
+    Only attempts resolution when the import string is explicitly relative.
+    Three flavors qualify:
+
+    * leading ``./`` or ``../`` (JS/TS, Dart),
+    * Zig importer with a ``.zig``-suffixed bare name (Zig has no leading-`./`
+      convention; package imports like ``@import("std")`` stay external),
+    * Python importer with leading-dot syntax (``from .lib import x`` →
+      ``.lib``; the leading dots are converted to ``./``/``../``).
+
+    Callers that resolve many imports for the same importer should pass
+    ``importer_ext`` / ``importer_dir`` to skip the per-call posixpath work.
+    """
+    import posixpath
+
+    if not imp:
+        return None
+    if imp.startswith(("/", "http:", "https:", "@")):
+        return None
+    if ":" in imp:
+        return None
+
+    if importer_ext is None:
+        importer_ext = posixpath.splitext(importer)[1]
+
+    if importer_ext == ".py" and imp.startswith("."):
+        leading_dots = 0
+        while leading_dots < len(imp) and imp[leading_dots] == ".":
+            leading_dots += 1
+        rest = imp[leading_dots:].replace(".", "/")
+        parents = "../" * (leading_dots - 1)
+        imp = f"./{parents}{rest}" if rest else (f"./{parents}".rstrip("/") or ".")
+
+    explicit_relative = imp.startswith("./") or imp.startswith("../")
+    zig_style = importer_ext == ".zig" and imp.endswith(".zig")
+    if not (explicit_relative or zig_style):
+        return None
+
+    if importer_dir is None:
+        importer_dir = posixpath.dirname(importer)
+    base = posixpath.normpath(posixpath.join(importer_dir, imp))
+
+    for candidate in _expand_import_candidates(base):
+        if candidate in file_set and candidate != importer:
+            return candidate
+    return None
+
+
+def _expand_import_candidates(base: str) -> list[str]:
+    """Return file-path candidates derived from a normalized base path."""
+    import posixpath
+
+    candidates = [base]
+    name = posixpath.basename(base)
+    if "." not in name:
+        candidates.extend(f"{base}{ext}" for ext in _RELATIVE_IMPORT_EXTS)
+        candidates.extend(f"{base}/{idx}" for idx in _RELATIVE_INDEX_FILES)
+    return candidates
+
 
 def _build_context_indices(
     files: list[str],
     content_cache: dict[str, str],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    import posixpath
+
     import_index: dict[str, list[str]] = {}
     export_map: dict[str, list[str]] = {}
 
@@ -732,9 +1061,20 @@ def _build_context_indices(
             sources = export_map[sym]
             if f not in sources:
                 callers.update(sources)
+        importer_ext = posixpath.splitext(f)[1]
+        importer_dir = posixpath.dirname(f)
         for imp in import_index.get(f, ()):
             if imp in file_set and imp != f:
                 callers.add(imp)
+            resolved = _resolve_relative_import(
+                f,
+                imp,
+                file_set,
+                importer_ext=importer_ext,
+                importer_dir=importer_dir,
+            )
+            if resolved is not None and resolved != f:
+                callers.add(resolved)
             sources = export_map.get(imp)
             if not sources:
                 continue

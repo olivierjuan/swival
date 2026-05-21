@@ -326,6 +326,811 @@ class TestImportExport:
         assert _is_auditable("app.psgi")
         assert not _is_auditable("t/basic.t")
 
+    def test_go_imports(self):
+        code = (
+            'import "fmt"\nimport _ "net/http/pprof"\nimport log "github.com/foo/log"\n'
+        )
+        imports = _extract_imports(code)
+        assert "fmt" in imports
+        assert "net/http/pprof" in imports
+        assert "github.com/foo/log" in imports
+        assert "_" not in imports
+        assert "log" not in imports
+
+    def test_go_grouped_imports(self):
+        code = (
+            "import (\n"
+            '    "fmt"\n'
+            '    _ "net/http/pprof"\n'
+            '    log "github.com/foo/log"\n'
+            ")\n"
+        )
+        imports = _extract_imports(code)
+        assert "fmt" in imports
+        assert "net/http/pprof" in imports
+        assert "github.com/foo/log" in imports
+
+    def test_dart_imports(self):
+        code = "import 'package:flutter/material.dart';\nimport 'dart:io';"
+        imports = _extract_imports(code)
+        assert "package:flutter/material.dart" in imports
+        assert "dart:io" in imports
+
+    def test_js_side_effect_import(self):
+        code = "import 'polyfill';"
+        assert "polyfill" in _extract_imports(code)
+
+    def test_js_re_export(self):
+        code = "export {x} from 'y';\nexport * from 'z';"
+        imports = _extract_imports(code)
+        assert "y" in imports
+        assert "z" in imports
+
+    def test_csharp_using(self):
+        code = (
+            "using System;\n"
+            "using System.IO;\n"
+            "using static System.Math;\n"
+            "using var stream = File.OpenRead(path);\n"
+        )
+        imports = _extract_imports(code)
+        assert "System" in imports
+        assert "System.IO" in imports
+        assert "System.Math" in imports
+        assert "var" not in imports
+
+    def test_cpp_using_namespace(self):
+        assert "std" in _extract_imports("using namespace std;")
+
+    def test_zig_import(self):
+        code = 'const std = @import("std");\nconst foo = @import("foo.zig");'
+        imports = _extract_imports(code)
+        assert "std" in imports
+        assert "foo.zig" in imports
+
+    def test_import_no_false_positive_on_dotted_call(self):
+        code = (
+            "const x = Array.from(items);\n"
+            "const y = obj.from('source');\n"
+            'const msg = "use foo from bar here";\n'
+        )
+        assert _extract_imports(code) == []
+
+    def test_go_package_not_export(self):
+        exports = _extract_exports("package main\n\nfunc Handler() {}\n")
+        assert "main" not in exports
+        assert "Handler" in exports
+
+    def test_java_package_not_export(self):
+        assert _extract_exports("package com.foo.bar;\n") == []
+
+    def test_kotlin_fun(self):
+        exports = _extract_exports("fun launch() = 1\nfun _inner() = 2\n")
+        assert "launch" in exports
+        assert "_inner" not in exports
+
+    def test_rust_full_exports(self):
+        code = (
+            "pub fn handler() {}\n"
+            "pub struct Session { id: u64 }\n"
+            "pub trait Auth {}\n"
+            "pub enum State { On, Off }\n"
+            "pub const MAX: u32 = 1;\n"
+            "pub static G: u8 = 0;\n"
+            "pub type Result = i32;\n"
+            "pub mod inner;\n"
+        )
+        exports = _extract_exports(code)
+        for sym in (
+            "handler",
+            "Session",
+            "Auth",
+            "State",
+            "MAX",
+            "G",
+            "Result",
+            "inner",
+        ):
+            assert sym in exports, sym
+
+    def test_zig_pub_const_var(self):
+        code = (
+            "pub fn main() void {}\n"
+            "pub const Server = struct { port: u16 };\n"
+            "pub var counter: u32 = 0;\n"
+        )
+        exports = _extract_exports(code)
+        assert "main" in exports
+        assert "Server" in exports
+        assert "counter" in exports
+
+    def test_js_aliased_default_import(self):
+        imports = _extract_imports('import api from "./api"')
+        assert imports == ["./api"]
+        assert "api" not in imports
+
+    def test_ts_type_import(self):
+        imports = _extract_imports('import type { T } from "./types"')
+        assert imports == ["./types"]
+        assert "type" not in imports
+
+    def test_js_default_and_named(self):
+        imports = _extract_imports('import api, { x, y } from "./api"')
+        assert "./api" in imports
+        assert "api" not in imports
+
+    def test_java_import_static(self):
+        imports = _extract_imports("import static java.lang.Math.*;")
+        assert "java.lang.Math" in imports
+        assert "static" not in imports
+
+    def test_haskell_qualified_import(self):
+        imports = _extract_imports("import qualified Data.Map as Map")
+        assert "Data.Map" in imports
+        assert "qualified" not in imports
+
+    def test_haskell_safe_import(self):
+        imports = _extract_imports("import safe Data.Foo")
+        assert "Data.Foo" in imports
+        assert "safe" not in imports
+
+    def test_swift_typed_imports(self):
+        imports = _extract_imports(
+            "import struct Foundation.UUID\nimport class UIKit.UIView\n"
+        )
+        assert "Foundation.UUID" in imports
+        assert "UIKit.UIView" in imports
+        assert "struct" not in imports
+        assert "class" not in imports
+
+    def test_go_block_strips_line_comments(self):
+        code = 'import (\n    // "fake/pkg"\n    "fmt"\n)\n'
+        imports = _extract_imports(code)
+        assert "fmt" in imports
+        assert "fake/pkg" not in imports
+
+    def test_go_block_strips_block_comments(self):
+        code = 'import (\n    /* "fake/blockpkg" */\n    "encoding/json"\n)\n'
+        imports = _extract_imports(code)
+        assert "encoding/json" in imports
+        assert "fake/blockpkg" not in imports
+
+    def test_zig_import_in_line_comment_ignored(self):
+        assert _extract_imports('// const x = @import("fake.zig");') == []
+
+    def test_zig_import_after_trailing_comment_ignored(self):
+        code = 'const x = "foo"; // @import("fake")'
+        assert _extract_imports(code) == []
+
+    def test_zig_real_import_with_trailing_comment(self):
+        code = 'const std = @import("std"); // safe'
+        assert _extract_imports(code) == ["std"]
+
+    def test_java_public_class(self):
+        assert "Handler" in _extract_exports("public class Handler {}")
+
+    def test_java_abstract_class(self):
+        assert "Base" in _extract_exports("public abstract class Base {}")
+
+    def test_kotlin_public_fun(self):
+        assert "launch" in _extract_exports("public fun launch() = 1")
+
+    def test_kotlin_suspend_inline_fun(self):
+        code = "private suspend inline fun execute() = 1"
+        assert "execute" in _extract_exports(code)
+
+    def test_rust_pub_crate_fn(self):
+        assert "handler" in _extract_exports("pub(crate) fn handler() {}")
+
+    def test_rust_pub_super_struct(self):
+        assert "Inner" in _extract_exports("pub(super) struct Inner {}")
+
+    def test_rust_pub_async_fn(self):
+        assert "serve" in _extract_exports("pub async fn serve() {}")
+
+    def test_rust_pub_unsafe_fn(self):
+        assert "do_it" in _extract_exports("pub unsafe fn do_it() {}")
+
+    def test_rust_pub_const_fn(self):
+        assert "compute" in _extract_exports("pub const fn compute() -> u32 { 1 }")
+
+    def test_rust_pub_extern_c_fn(self):
+        assert "ffi" in _extract_exports('pub extern "C" fn ffi() {}')
+
+    def test_swift_public_func(self):
+        assert "run" in _extract_exports("public func run() {}")
+
+    def test_swift_private_static_func(self):
+        assert "helper" in _extract_exports("private static func helper() {}")
+
+    def test_js_async_function(self):
+        assert "fetcher" in _extract_exports("async function fetcher() {}")
+
+    def test_ruby_def_self_method(self):
+        exports = _extract_exports("def self.call\n  1\nend")
+        assert "call" in exports
+        assert "self" not in exports
+
+    def test_ruby_def_class_method(self):
+        exports = _extract_exports("def MyCls.create\n  1\nend")
+        assert "create" in exports
+        assert "MyCls" not in exports
+
+    def test_ruby_def_self_private_filtered(self):
+        assert _extract_exports("def self._helper\n  1\nend") == []
+
+    def test_js_string_literal_with_from_not_imported(self):
+        assert _extract_imports("const msg = \"loaded from 'fake'\";") == []
+
+    def test_js_template_literal_with_from_not_imported(self):
+        assert _extract_imports("let note = `loaded from 'fake'`;") == []
+
+    def test_js_double_quoted_with_from_not_imported(self):
+        assert _extract_imports("var x = \"imported from 'fake' source\";") == []
+
+    def test_go_import_block_in_block_comment_ignored(self):
+        code = '/*\nimport (\n  "fake/pkg"\n)\n*/\n\nimport (\n  "real/pkg"\n)\n'
+        imports = _extract_imports(code)
+        assert "real/pkg" in imports
+        assert "fake/pkg" not in imports
+
+    def test_zig_multiline_string_line_ignored(self):
+        # In Zig multiline string literals, each line starts with `\\`. A
+        # `@import("...")` inside such a line is part of string content, not
+        # code, and must not register as an import.
+        code = (
+            "const text =\n"
+            '    \\\\@import("fake.zig")\n'
+            "    \\\\more text\n"
+            ";\n"
+            'const std = @import("std");\n'
+        )
+        imports = _extract_imports(code)
+        assert "std" in imports
+        assert "fake.zig" not in imports
+
+    def test_haskell_multi_modifier_import(self):
+        imports = _extract_imports("import safe qualified Data.Map as Map")
+        assert imports == ["Data.Map"]
+
+    def test_haskell_modifier_order_swap(self):
+        imports = _extract_imports("import qualified safe Data.Map as Map")
+        assert imports == ["Data.Map"]
+
+
+# ---------------------------------------------------------------------------
+# Relative import resolution
+# ---------------------------------------------------------------------------
+
+
+class TestRelativeImportResolution:
+    def test_zig_relative_resolves_to_sibling(self):
+        cache = {
+            "src/main.zig": 'const foo = @import("foo.zig");\nfoo.doit();\n',
+            "src/foo.zig": "pub fn doit() void {}\n",
+        }
+        imp_idx, call_idx = _build_context_indices(
+            ["src/main.zig", "src/foo.zig"], cache
+        )
+        assert imp_idx["src/main.zig"] == ["foo.zig"]
+        assert call_idx["src/main.zig"] == ["src/foo.zig"]
+
+    def test_ts_dot_slash_resolves_with_extension(self):
+        cache = {
+            "src/main.ts": 'import api from "./api";\n',
+            "src/api.ts": "export function call() {}\n",
+        }
+        imp_idx, call_idx = _build_context_indices(["src/main.ts", "src/api.ts"], cache)
+        assert call_idx["src/main.ts"] == ["src/api.ts"]
+
+    def test_ts_nested_relative_resolves(self):
+        cache = {
+            "src/main.ts": 'import util from "./lib/util";\n',
+            "src/lib/util.ts": "export function helper() {}\n",
+        }
+        imp_idx, call_idx = _build_context_indices(
+            ["src/main.ts", "src/lib/util.ts"], cache
+        )
+        assert call_idx["src/main.ts"] == ["src/lib/util.ts"]
+
+    def test_ts_parent_relative_resolves(self):
+        cache = {
+            "src/feature/main.ts": 'import shared from "../shared";\n',
+            "src/shared.ts": "export function s() {}\n",
+        }
+        imp_idx, call_idx = _build_context_indices(
+            ["src/feature/main.ts", "src/shared.ts"], cache
+        )
+        assert call_idx["src/feature/main.ts"] == ["src/shared.ts"]
+
+    def test_ts_index_file_resolves(self):
+        cache = {
+            "src/main.ts": 'import lib from "./lib";\n',
+            "src/lib/index.ts": "export function f() {}\n",
+        }
+        imp_idx, call_idx = _build_context_indices(
+            ["src/main.ts", "src/lib/index.ts"], cache
+        )
+        assert call_idx["src/main.ts"] == ["src/lib/index.ts"]
+
+    def test_external_import_does_not_resolve(self):
+        cache = {
+            "src/main.ts": 'import react from "react";\n',
+            "src/local.ts": "export function f() {}\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["src/main.ts", "src/local.ts"], cache
+        )
+        assert "src/main.ts" not in call_idx
+
+    def test_bare_specifier_does_not_link_to_samename_local(self):
+        cache = {
+            "src/main.ts": 'import react from "react";\nimport local from "./local";\n',
+            "src/react.ts": "export function fake() {}\n",
+            "src/local.ts": "export function real() {}\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["src/main.ts", "src/react.ts", "src/local.ts"], cache
+        )
+        # Bare specifier `react` is an NPM package; even though src/react.ts
+        # exists, it must not be treated as the importer's dependency.
+        assert call_idx.get("src/main.ts") == ["src/local.ts"]
+
+    def test_zig_bare_import_still_resolves(self):
+        cache = {
+            "src/main.zig": 'const foo = @import("foo.zig");\n',
+            "src/foo.zig": "pub fn x() void {}\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["src/main.zig", "src/foo.zig"], cache
+        )
+        assert call_idx["src/main.zig"] == ["src/foo.zig"]
+
+
+# ---------------------------------------------------------------------------
+# Block-comment handling for imports and exports
+# ---------------------------------------------------------------------------
+
+
+class TestBlockCommentStripping:
+    def test_zig_import_in_inline_block_comment(self):
+        assert _extract_imports('/* @import("fake.zig") */') == []
+
+    def test_zig_import_in_multiline_block_comment(self):
+        code = '/*\n@import("fake.zig")\n*/\nconst real = @import("std");\n'
+        imports = _extract_imports(code)
+        assert "std" in imports
+        assert "fake.zig" not in imports
+
+    def test_export_in_block_comment_ignored(self):
+        code = "/*\npublic class Fake {}\n*/\npublic class Real {}\n"
+        exports = _extract_exports(code)
+        assert "Real" in exports
+        assert "Fake" not in exports
+
+    def test_inline_block_comment_around_class_ignored(self):
+        code = "public /* hidden */ class Real {}\n"
+        assert "Real" in _extract_exports(code)
+
+    def test_go_import_in_block_comment_does_not_link(self):
+        cache = {
+            "main.go": (
+                '/*\nimport (\n  "fake/pkg"\n)\n*/\n\nimport (\n  "real/pkg"\n)\n'
+            ),
+        }
+        from swival.audit import _extract_imports as ei
+
+        result = ei(cache["main.go"])
+        assert "real/pkg" in result
+        assert "fake/pkg" not in result
+
+    def test_block_comment_markers_inside_strings_preserve_code(self):
+        # `/*` and `*/` appear only inside string literals; the def between
+        # them must still be visible to the exporter.
+        code = 's = "/*"\ndef real(): pass\nt = "*/"\n'
+        assert "real" in _extract_exports(code)
+
+    def test_block_comment_markers_inside_strings_preserve_import(self):
+        code = 'const marker = "/*";\nimport x from "./x";\nconst end = "*/";\n'
+        assert "./x" in _extract_imports(code)
+
+
+# ---------------------------------------------------------------------------
+# Zig package-vs-file import distinction
+# ---------------------------------------------------------------------------
+
+
+class TestZigImportResolution:
+    def test_zig_package_name_does_not_link_to_local_file(self):
+        # `@import("std")` is the Zig standard library — even if a same-named
+        # `src/std.zig` exists, the importer must not be linked to it.
+        cache = {
+            "src/main.zig": 'const std = @import("std");\nconst foo = @import("foo.zig");\n',
+            "src/std.zig": "pub fn fake() void {}\n",
+            "src/foo.zig": "pub fn real() void {}\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["src/main.zig", "src/std.zig", "src/foo.zig"], cache
+        )
+        assert call_idx.get("src/main.zig") == ["src/foo.zig"]
+
+    def test_zig_dotzig_suffix_resolves_relative(self):
+        cache = {
+            "src/sub/main.zig": 'const foo = @import("foo.zig");\n',
+            "src/sub/foo.zig": "pub fn x() void {}\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["src/sub/main.zig", "src/sub/foo.zig"], cache
+        )
+        assert call_idx["src/sub/main.zig"] == ["src/sub/foo.zig"]
+
+
+# ---------------------------------------------------------------------------
+# Python relative imports
+# ---------------------------------------------------------------------------
+
+
+class TestPythonRelativeImports:
+    def test_single_dot_sibling_module(self):
+        cache = {
+            "pkg/sub/main.py": "from .lib import helper\n",
+            "pkg/sub/lib.py": "def helper(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/sub/lib.py"], cache
+        )
+        assert "pkg/sub/lib.py" in call_idx["pkg/sub/main.py"]
+
+    def test_double_dot_parent_module(self):
+        cache = {
+            "pkg/sub/main.py": "from ..util import other\n",
+            "pkg/util.py": "def other(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/util.py"], cache
+        )
+        assert "pkg/util.py" in call_idx["pkg/sub/main.py"]
+
+    def test_dotted_subpath_resolves(self):
+        cache = {
+            "pkg/sub/main.py": "from ..util.helpers import x\n",
+            "pkg/util/helpers.py": "def x(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/util/helpers.py"], cache
+        )
+        assert "pkg/util/helpers.py" in call_idx["pkg/sub/main.py"]
+
+    def test_python_package_via_init(self):
+        cache = {
+            "pkg/sub/main.py": "from .lib import x\n",
+            "pkg/sub/lib/__init__.py": "def x(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/sub/lib/__init__.py"], cache
+        )
+        assert "pkg/sub/lib/__init__.py" in call_idx["pkg/sub/main.py"]
+
+    def test_from_dot_import_name(self):
+        cache = {
+            "pkg/sub/main.py": "from . import lib\n",
+            "pkg/sub/lib.py": "def x(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/sub/lib.py"], cache
+        )
+        assert "pkg/sub/lib.py" in call_idx["pkg/sub/main.py"]
+
+    def test_from_dot_import_multiple_names(self):
+        cache = {
+            "pkg/sub/main.py": "from . import lib, helpers as h\n",
+            "pkg/sub/lib.py": "def x(): pass\n",
+            "pkg/sub/helpers.py": "def y(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/sub/lib.py", "pkg/sub/helpers.py"], cache
+        )
+        assert "pkg/sub/lib.py" in call_idx["pkg/sub/main.py"]
+        assert "pkg/sub/helpers.py" in call_idx["pkg/sub/main.py"]
+
+    def test_from_double_dot_import_name(self):
+        cache = {
+            "pkg/sub/main.py": "from .. import util\n",
+            "pkg/util.py": "def x(): pass\n",
+        }
+        _imp_idx, call_idx = _build_context_indices(
+            ["pkg/sub/main.py", "pkg/util.py"], cache
+        )
+        assert "pkg/util.py" in call_idx["pkg/sub/main.py"]
+
+
+# ---------------------------------------------------------------------------
+# String-aware filtering: imports inside string literals and `//` line comments
+# ---------------------------------------------------------------------------
+
+
+class TestStringLiteralFiltering:
+    def test_require_inside_double_quoted_string_ignored(self):
+        assert _extract_imports("const s = \"require('fake')\";") == []
+
+    def test_require_inside_single_quoted_string_ignored(self):
+        assert _extract_imports("const s = 'require(\"fake\")';") == []
+
+    def test_require_inside_line_comment_ignored(self):
+        assert _extract_imports("// require('fake')") == []
+
+    def test_require_after_url_string_still_matches(self):
+        # `//` inside a URL string must not cause the rest of the line to be
+        # treated as a comment.
+        code = 'const u = "https://x.com"; const fs = require("fs");'
+        assert "fs" in _extract_imports(code)
+
+    def test_real_require_outside_string_still_matches(self):
+        assert _extract_imports("const fs = require('fs');") == ["fs"]
+
+    def test_zig_import_inside_string_ignored(self):
+        code = 'const fake_url = "see @import(\\"foo.zig\\") docs";'
+        assert _extract_imports(code) == []
+
+    def test_zig_import_inside_single_quoted_string_ignored(self):
+        code = "const s = '@import(\"foo.zig\")';"
+        assert _extract_imports(code) == []
+
+    def test_zig_import_inside_backtick_string_ignored(self):
+        code = 'const s = `@import("foo.zig")`;'
+        assert _extract_imports(code) == []
+
+    def test_export_inside_js_template_literal_ignored(self):
+        code = "const s = `\nclass Fake {}\nfunction nope() {}\n`;\nclass Real {}\n"
+        exports = _extract_exports(code)
+        assert "Real" in exports
+        assert "Fake" not in exports
+        assert "nope" not in exports
+
+    def test_export_inside_python_triple_double_docstring_ignored(self):
+        code = '"""def fake(): pass"""\ndef real(): pass\n'
+        exports = _extract_exports(code)
+        assert "real" in exports
+        assert "fake" not in exports
+
+    def test_export_inside_python_triple_single_docstring_ignored(self):
+        code = "'''class Fake: pass'''\nclass Real: pass\n"
+        exports = _extract_exports(code)
+        assert "Real" in exports
+        assert "Fake" not in exports
+
+    def test_multiline_python_docstring_with_code_ignored(self):
+        code = (
+            "def real():\n"
+            '    """\n'
+            "    Example::\n"
+            "\n"
+            "        def fake_inside_doc(): pass\n"
+            "        class Bogus: pass\n"
+            '    """\n'
+            "    return 1\n"
+        )
+        exports = _extract_exports(code)
+        assert "real" in exports
+        assert "fake_inside_doc" not in exports
+        assert "Bogus" not in exports
+
+    def test_zig_import_after_string_on_same_line(self):
+        # The `@import` should still be detected when a string literal
+        # appears earlier on the same line.
+        code = 'const x = foo("s", @import("a.zig"));'
+        assert _extract_imports(code) == ["a.zig"]
+
+    def test_zig_multiple_imports_on_same_line(self):
+        code = 'const a = @import("a.zig"); const b = @import("b.zig");'
+        imports = _extract_imports(code)
+        assert imports == ["a.zig", "b.zig"]
+
+    def test_js_regex_literal_does_not_leak_inner_import(self):
+        code = (
+            'const re = /\\/\\/* import x from "fake" *\\//;\n'
+            'import real from "./real";\n'
+        )
+        imports = _extract_imports(code)
+        assert "./real" in imports
+        assert "fake" not in imports
+
+    def test_js_regex_literal_with_inner_quoted_path(self):
+        # Regex literal contains text that looks like an import; the
+        # surrounding `/.../g` masks it so the inner `"fake"` is ignored.
+        code = "const re = /import x from 'fake'/g;"
+        assert _extract_imports(code) == []
+
+    def test_js_division_not_treated_as_regex_literal(self):
+        # The `/` after `a` is preceded by an alphanumeric (not an operator
+        # context), so it must not be parsed as a regex literal. The real
+        # import on the next line must still resolve.
+        code = "const x = a/b;\nimport real from './real';"
+        assert "./real" in _extract_imports(code)
+
+    def test_regex_literal_at_start_of_file_recognized(self):
+        # Regex literal at column 0 of input must still be tokenized as an
+        # opaque span so the `require` inside doesn't leak.
+        code = "/require('fake')/.test(s);\nconst fs = require('fs');"
+        imports = _extract_imports(code)
+        assert "fs" in imports
+        assert "fake" not in imports
+
+    def test_regex_literal_at_start_of_line_recognized(self):
+        code = 'x = 1;\n/import x from "fake"/.test(s);\nimport real from "./real";'
+        imports = _extract_imports(code)
+        assert "./real" in imports
+        assert "fake" not in imports
+
+    def test_division_with_call_between_slashes_not_masked(self):
+        # `a / require('real') / b` is plain arithmetic; the require() in the
+        # middle must not be swallowed as if `/ require('real') /` were a
+        # regex literal.
+        code = "const x = a / require('real') / b;"
+        assert "real" in _extract_imports(code)
+
+    def test_regex_with_leading_space_in_strong_context_masked(self):
+        # After `=`, a `/`-pattern is unambiguously a regex literal even if
+        # the pattern starts with whitespace; the inner `require('fake')`
+        # must not leak.
+        code = "const re = / require('fake')/;\nconst fs = require('fs');"
+        imports = _extract_imports(code)
+        assert "fs" in imports
+        assert "fake" not in imports
+
+    def test_block_comment_not_misread_as_regex_literal(self):
+        # The `(?!\*)` guard keeps `/* ... */` from being eaten as a regex
+        # literal starting with `*`. The block comment is dropped, the real
+        # import survives.
+        code = 'import (\n    /* "fake/pkg" */\n    "real/pkg"\n)\n'
+        imports = _extract_imports(code)
+        assert "real/pkg" in imports
+        assert "fake/pkg" not in imports
+
+    def test_regex_after_return_keyword_masked(self):
+        code = (
+            "function f() { return / require('fake')/; }\nconst fs = require('fs');\n"
+        )
+        imports = _extract_imports(code)
+        assert "fs" in imports
+        assert "fake" not in imports
+
+    def test_regex_after_arrow_function_masked(self):
+        code = "const f = () => / require('fake')/;\nconst fs = require('fs');\n"
+        imports = _extract_imports(code)
+        assert "fs" in imports
+        assert "fake" not in imports
+
+    def test_regex_after_typeof_keyword_masked(self):
+        code = (
+            "if (typeof / require('fake')/ === 'object') {}\n"
+            "const fs = require('fs');\n"
+        )
+        imports = _extract_imports(code)
+        assert "fs" in imports
+        assert "fake" not in imports
+
+    def test_identifier_ending_in_return_not_confused_with_keyword(self):
+        # `myreturn` is just a variable name; `\b` in the lookbehind must
+        # require a word boundary so the `return` keyword check doesn't fire
+        # on identifiers that happen to end with those letters.
+        code = "const myreturn = require('real');"
+        assert _extract_imports(code) == ["real"]
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "function f() { throw / require('fake')/; }",
+            "function* g() { yield / require('fake')/; }",
+            "void / require('fake')/;",
+            "delete / require('fake')/.x;",
+            "switch (x) { case / require('fake')/: break; }",
+            "async function a() { await / require('fake')/; }",
+            "x instanceof / require('fake')/;",
+            "const x = new / require('fake')/.test(s);",
+            "if (x in / require('fake')/) {}",
+            "if (a) b; else / require('fake')/.test(x);",
+        ],
+    )
+    def test_regex_after_js_expression_keywords_masked(self, code):
+        full = code + "\nconst fs = require('fs');\n"
+        imports = _extract_imports(full)
+        assert "fs" in imports
+        assert "fake" not in imports
+
+    @pytest.mark.parametrize(
+        "ident",
+        [
+            "mythrow",
+            "yielded",
+            "voided",
+            "deleted",
+            "uppercase",
+            "awaiting",
+            "renew",
+            "newer",
+            "min",
+            "coin",
+            "rinse",
+            "welse",
+            "false",
+        ],
+    )
+    def test_identifier_ending_in_keyword_not_confused(self, ident):
+        # `\b` in each keyword lookbehind keeps these identifier-shapes from
+        # firing the strong-context arm.
+        code = f"const {ident} = require('real');"
+        assert _extract_imports(code) == ["real"]
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "const x = obj.in / require('real') / b;",
+            "obj.delete / require('real') / b;",
+            "obj.return / require('real') / b;",
+            "obj.new / require('real') / b;",
+            "obj.throw / require('real') / b;",
+            "obj.case / require('real') / b;",
+            "obj.typeof / require('real') / b;",
+            "obj.yield / require('real') / b;",
+        ],
+    )
+    def test_member_access_keyword_does_not_mask_division(self, code):
+        # `obj.return / x / y` is division on a property; the keyword
+        # lookbehinds must not fire after `.`.
+        assert "real" in _extract_imports(code)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "const x = obj['return'] / require('real') / b;",
+            "const x = arr[0] / require('real') / b;",
+            "obj[key] / require('real') / divisor;",
+        ],
+    )
+    def test_bracket_access_division_recovers_inner_require(self, code):
+        # `arr[i] / x / y` is division on an indexed value. With `]` in the
+        # weak set, `/ x /` is rejected as a regex literal (whitespace-leading)
+        # and the inner require is recovered.
+        assert "real" in _extract_imports(code)
+
+    def test_non_whitespace_regex_after_bracket_still_masked(self):
+        # `arr[i] /pattern/.test(...)` is the rare-but-legal case where a
+        # regex literal directly follows `]`; the weak arm allows it because
+        # the pattern doesn't start with whitespace.
+        code = "const out = arr[i] /\\d+/g.test(s);\nimport real from './real';\n"
+        assert "./real" in _extract_imports(code)
+
+    def test_array_literal_containing_regex_literal(self):
+        code = "const rs = [/foo/, /bar/];\nimport real from './real';"
+        assert "./real" in _extract_imports(code)
+
+
+# ---------------------------------------------------------------------------
+# Go import block trapped inside raw-string literal
+# ---------------------------------------------------------------------------
+
+
+class TestGoStringMasking:
+    def test_go_import_block_in_raw_string_ignored(self):
+        code = (
+            "package main\n"
+            "var s = `\n"
+            "import (\n"
+            '  "./local"\n'
+            ")\n"
+            "`\n"
+            "\n"
+            "import (\n"
+            '  "fmt"\n'
+            '  "real/pkg"\n'
+            ")\n"
+        )
+        imports = _extract_imports(code)
+        assert "fmt" in imports
+        assert "real/pkg" in imports
+        assert "./local" not in imports
+
 
 # ---------------------------------------------------------------------------
 # Batched git read (_git_show_many)
