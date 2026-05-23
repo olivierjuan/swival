@@ -2,6 +2,16 @@
 
 All notable user-facing changes to Swival.
 
+## 1.0.19
+
+- Swival now records a checksum of every file it reads and verifies that checksum before the next write, so a concurrent edit from your editor or another process is detected immediately instead of being silently overwritten.
+- `edit_file` errors are much more helpful when the `old_string` cannot be located: the failure message now includes the closest matching line or multi-line window from the file, letting the model fix the search text without rereading the file from scratch.
+- `edit_file` no longer doubles up newlines at splice boundaries. When `old_string` omits the file's trailing newline at the edge of the match and `new_string` ends in one, the splice now absorbs the file's newline cleanly instead of leaving a stray blank line behind.
+- `/clear` now also clears any pending continuation prompt, and paths in command output are quoted so the agent treats names containing spaces as single entries.
+- The Swival version is now printed in the startup banner and shown by `/status`, making it easier to confirm which build is running.
+- `/audit` symbol and import parsing has been substantially hardened. The extractor strips comments and string literals before matching, so imports and exports no longer leak from docstrings, template literals, Zig multiline strings, or comment blocks. Coverage for Go bare-string and grouped imports, JavaScript side-effect imports and re-exports, C# `using`, Kotlin `fun`, Rust `pub struct/trait/enum`, Zig `pub const`, and Python relative imports has all improved, and several common false positives around member access and modifier-prefixed declarations are gone.
+- `/audit` now supports Perl.
+
 ## 1.0.18
 
 - Assistant responses now stream to the terminal as they are produced, so you see tokens arrive in real time instead of waiting for the full turn to complete.
