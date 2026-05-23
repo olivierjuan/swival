@@ -123,7 +123,7 @@ _VISION_REJECTION_PATTERNS = (
 )
 
 # Canonical prefixes for synthetic user messages injected by the agent loop.
-# Used by continue_here._find_last_user_task to skip interventions.
+# Used by continue_here._find_user_task to skip interventions.
 _COMMAND_TOOL_CONTEXT_PREFIX = "[Context for follow-up:"
 
 SYNTHETIC_USER_PREFIXES: tuple[str, ...] = (

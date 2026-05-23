@@ -83,8 +83,7 @@ def _walk_python(nodes: list[ast.stmt], depth: int, level: int, out: list[str]):
     for node in nodes:
         if isinstance(node, ast.ClassDef):
             decorators = "".join(
-                f"{d.lineno:<5}{indent}@{_decorator_text(d)}\n"
-                for d in node.decorator_list
+                f"{d.lineno:<5}{indent}@{_expr_text(d)}\n" for d in node.decorator_list
             )
             bases = ", ".join(_expr_text(b) for b in node.bases)
             sig = f"class {node.name}({bases})" if bases else f"class {node.name}"
@@ -94,8 +93,7 @@ def _walk_python(nodes: list[ast.stmt], depth: int, level: int, out: list[str]):
 
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             decorators = "".join(
-                f"{d.lineno:<5}{indent}@{_decorator_text(d)}\n"
-                for d in node.decorator_list
+                f"{d.lineno:<5}{indent}@{_expr_text(d)}\n" for d in node.decorator_list
             )
             prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
             sig = _func_signature(node)
@@ -168,10 +166,6 @@ def _func_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
 def _expr_text(node: ast.expr | None) -> str:
     if node is None:
         return ""
-    return ast.unparse(node)
-
-
-def _decorator_text(node: ast.expr) -> str:
     return ast.unparse(node)
 
 

@@ -34,20 +34,14 @@ def _safe_continue_path(base_dir: str) -> Path:
     return p
 
 
-def _find_last_user_task(messages: list) -> str | None:
-    """Find the most recent substantive user message (not a synthetic intervention)."""
-    for msg in reversed(messages):
-        if _msg_role(msg) != "user":
-            continue
-        content = _msg_content(msg)
-        if content and not _is_synthetic(msg):
-            return content
-    return None
+def _find_user_task(messages: list, *, reverse: bool = False) -> str | None:
+    """Find a substantive user message (not a synthetic intervention).
 
-
-def _find_first_user_task(messages: list) -> str | None:
-    """Find the first substantive user message."""
-    for msg in messages:
+    When *reverse* is False (default), returns the first match.
+    When *reverse* is True, returns the last match.
+    """
+    iterator = reversed(messages) if reverse else messages
+    for msg in iterator:
         if _msg_role(msg) != "user":
             continue
         content = _msg_content(msg)
@@ -95,8 +89,8 @@ def _build_deterministic_continue(
     sections: list[str] = ["# Continue Here\n"]
 
     # Current task
-    last_task = _find_last_user_task(messages)
-    first_task = _find_first_user_task(messages)
+    last_task = _find_user_task(messages, reverse=True)
+    first_task = _find_user_task(messages)
 
     if last_task:
         sections.append("## Current task")

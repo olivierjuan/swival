@@ -10,8 +10,7 @@ from swival import fmt
 from swival.continue_here import (
     MAX_CONTINUE_CHARS,
     _safe_continue_path,
-    _find_last_user_task,
-    _find_first_user_task,
+    _find_user_task,
     _build_deterministic_continue,
     write_continue_file,
     clear_continue_file,
@@ -74,7 +73,7 @@ class TestPathSafety:
 class TestFindUserTask:
     def test_last_user_task_simple(self):
         msgs = [_sys(), _user("fix the bug"), _assistant("ok")]
-        assert _find_last_user_task(msgs) == "fix the bug"
+        assert _find_user_task(msgs, reverse=True) == "fix the bug"
 
     def test_last_user_task_multi_turn(self):
         msgs = [
@@ -84,7 +83,7 @@ class TestFindUserTask:
             _user("second task"),
             _assistant("ok"),
         ]
-        assert _find_last_user_task(msgs) == "second task"
+        assert _find_user_task(msgs, reverse=True) == "second task"
 
     def test_skips_synthetic_prefixes(self):
         def _synth(content):
@@ -109,7 +108,7 @@ class TestFindUserTask:
                 "tool-call actions.\n\nfix the typo"
             ),
         ]
-        assert _find_last_user_task(msgs) == "real task"
+        assert _find_user_task(msgs, reverse=True) == "real task"
 
     def test_preserves_real_user_with_important_prefix(self):
         """A real user message starting with IMPORTANT: must not be skipped."""
@@ -118,7 +117,10 @@ class TestFindUserTask:
             _user("IMPORTANT: do not modify package.json"),
             _assistant("ok"),
         ]
-        assert _find_last_user_task(msgs) == "IMPORTANT: do not modify package.json"
+        assert (
+            _find_user_task(msgs, reverse=True)
+            == "IMPORTANT: do not modify package.json"
+        )
 
     def test_namespace_synthetic_skipped(self):
         """Namespace-style messages with _swival_synthetic are also skipped."""
@@ -130,16 +132,16 @@ class TestFindUserTask:
             _swival_synthetic=True,
         )
         msgs = [_sys(), ns_msg, _user("real task")]
-        assert _find_last_user_task(msgs) == "real task"
-        assert _find_first_user_task(msgs) == "real task"
+        assert _find_user_task(msgs, reverse=True) == "real task"
+        assert _find_user_task(msgs) == "real task"
 
     def test_returns_none_empty(self):
-        assert _find_last_user_task([_sys()]) is None
-        assert _find_last_user_task([]) is None
+        assert _find_user_task([_sys()], reverse=True) is None
+        assert _find_user_task([], reverse=True) is None
 
     def test_first_user_task(self):
         msgs = [_sys(), _user("first"), _assistant("ok"), _user("second")]
-        assert _find_first_user_task(msgs) == "first"
+        assert _find_user_task(msgs) == "first"
 
     def test_first_skips_synthetic(self):
         msgs = [
@@ -147,7 +149,7 @@ class TestFindUserTask:
             {"role": "user", "content": "IMPORTANT: error", "_swival_synthetic": True},
             _user("real first"),
         ]
-        assert _find_first_user_task(msgs) == "real first"
+        assert _find_user_task(msgs) == "real first"
 
 
 # ---------------------------------------------------------------------------
