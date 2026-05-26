@@ -20,7 +20,13 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*PydanticSerializationUnexpectedValue.*",
+)
 
 from importlib import metadata
 
