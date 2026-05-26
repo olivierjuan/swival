@@ -1935,7 +1935,9 @@ Reject any claim that is not fully proven.
 You have no tools, no shell access, and no ability to run commands.
 All the source code you need is included below. Do not request additional information.
 
-Output format: one or more `@@ finding @@` blocks. Each block has these keys, one per line:
+Output format: either one or more `@@ finding @@` blocks (described below), OR the single line `@@ none @@` if no in-scope finding exists. No other output shape is valid.
+
+Each `@@ finding @@` block has these keys, one per line:
 - title: short title
 - severity: low | medium | high | critical
 - location: path:line
@@ -2006,7 +2008,7 @@ Explicitly out of scope — emit nothing for these even when the bug is real:
 
 Only report bugs where the structured fields specifically answer attacker / trigger / gain — for example "unauthenticated open redirect on failed form auth" or "out-of-bounds read on attacker-supplied trailing CR" — or where the security_control_failure carve-out lets the cited function's own job (an Ed25519 verifier, a seccomp policy enforcer) supply the security context.
 
-If no finding survives the scope gate, output the single line and nothing else:
+If no finding survives the scope gate, emit exactly the single line below and stop. Do not write any prose, explanation, apology, or summary — the literal sentinel is the only valid no-finding response:
 
 @@ none @@"""
 
