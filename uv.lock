@@ -543,9 +543,16 @@ wheels = [
 
 [[package]]
 name = "html-to-markdown"
-version = "3.4.0"
+version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ae/30/a4aa8f9c9febf6096b0d14e3fa3559a8e100802fa81bd67deb8a8031c14d/html_to_markdown-3.4.0.tar.gz", hash = "sha256:3e7e0813cc871c7abe2d5ea927e9038374bea339e8dd72f3b4c2f1c0b8e51672", size = 283028, upload-time = "2026-05-09T11:07:49.784Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/28/3384b4e8460ab3daa337f123fd1c93034023a539950051aa8b1d29734571/html_to_markdown-3.5.0.tar.gz", hash = "sha256:28b4944649581c8e5e1bb2bd97a1b5adf42d6ef364fbdc8e0df5c057699f3141", size = 4364222, upload-time = "2026-05-25T14:14:22.649Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4b/fc/31bbd5df2a00668ccbb54448302bd124e23f509f493785a3670fb6b1c34b/html_to_markdown-3.5.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:d101fc4c57191a411d241069c9dc8603e2045923ccc8f0fe2f675082d67282a7", size = 6084477, upload-time = "2026-05-25T14:14:18.882Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/ef/ac19c0c5e0d87e482cf77299ea37b7d71753f59c86b9b82091eae164858e/html_to_markdown-3.5.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:b00eb81201827cad3243bcd2c3a847468635c564848cf49e215bc1a63138cb27", size = 5727524, upload-time = "2026-05-25T14:14:20.6Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/31/5bb3fb83cee51e568b55078fb9f30820222b19545cad37092541c8bcb39c/html_to_markdown-3.5.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:fdf1df98a2c873c80c8b92a02b6c78dfe01ad3dc85d23711bf1626e71c5e17a6", size = 5880795, upload-time = "2026-05-25T14:14:24.472Z" },
+    { url = "https://files.pythonhosted.org/packages/49/1b/02befe619fdbd341fadc08896b0e43f156a29dce766f9309c42d3f12e481/html_to_markdown-3.5.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:2c446382923d7bc80b40ac82296a9826ec88656488d545b18f235bc99da5baf3", size = 6255459, upload-time = "2026-05-25T14:14:17.101Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/3c/3a1cf0b85113f79923f096250e57952dc740a8ec58457706263b3dea86f1/html_to_markdown-3.5.0-cp310-abi3-win_amd64.whl", hash = "sha256:3df70b1bbde67b6f7ce921b215f0a7023f9beb7459963157eaa04dc84d509e8f", size = 6279460, upload-time = "2026-05-25T14:14:14.79Z" },
+]
 
 [[package]]
 name = "httpcore"
