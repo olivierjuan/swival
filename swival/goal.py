@@ -185,9 +185,7 @@ class GoalState:
         return True
 
     def resume(self) -> bool:
-        if self.current is None:
-            return False
-        if self.current.status != GoalStatus.PAUSED:
+        if self.current is None or self.current.status != GoalStatus.PAUSED:
             return False
         self.set_status(GoalStatus.ACTIVE)
         return True
@@ -261,15 +259,11 @@ class GoalState:
         return max(0, self.current.token_budget - self.current.tokens_used)
 
     def record_next_step(self, text: str | None) -> None:
-        if self.current is None:
-            return
-        if text:
+        if self.current is not None and text:
             self.current.last_next_step = text[:1000]
 
     def record_blocker(self, text: str | None) -> None:
-        if self.current is None:
-            return
-        if text:
+        if self.current is not None and text:
             self.current.last_blocker = text[:1000]
 
     # ------------------------------------------------------------------ prompts

@@ -199,13 +199,10 @@ def run_as_reviewer(args, base_dir: str) -> int:
     # Parse verdict
     verdict = _parse_verdict(response_text)
 
-    if verdict == "ACCEPT":
+    if verdict in ("ACCEPT", "RETRY"):
         print(response_text)
-        return 0
-    elif verdict == "RETRY":
-        print(response_text)
-        return 1
-    else:
-        print("reviewer error: no VERDICT found in LLM response", file=sys.stderr)
-        print(response_text)
-        return 2
+        return 0 if verdict == "ACCEPT" else 1
+
+    print("reviewer error: no VERDICT found in LLM response", file=sys.stderr)
+    print(response_text)
+    return 2
