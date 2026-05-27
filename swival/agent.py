@@ -21,18 +21,8 @@ import time
 import urllib.request
 import urllib.error
 import warnings
-from pathlib import Path
-
-# LiteLLM's ChatGPT Responses transformer falls back to model_construct() when
-# strict validation of a response.completed event fails, which skips the usage
-# validator and leaves a dict in the ResponseAPIUsage field. The next model_dump
-# then complains. Tracked upstream as BerriAI/litellm#26784.
-warnings.filterwarnings(
-    "ignore",
-    message=r"Pydantic serializer warnings",
-)
-
 from importlib import metadata
+from pathlib import Path
 
 import tiktoken
 
@@ -118,6 +108,15 @@ from .tool_call_repair import (
     is_mutating as _tcr_is_mutating,
     repair_truncated_json,
     scavenge_tool_calls,
+)
+
+# LiteLLM's ChatGPT Responses transformer falls back to model_construct() when
+# strict validation of a response.completed event fails, which skips the usage
+# validator and leaves a dict in the ResponseAPIUsage field. The next model_dump
+# then complains. Tracked upstream as BerriAI/litellm#26784.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Pydantic serializer warnings",
 )
 
 DEFAULT_SYSTEM_PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
