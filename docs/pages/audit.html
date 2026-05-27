@@ -120,8 +120,9 @@ state file and one set of reports:</p>
 </code></pre>
 <p>When the audit finishes, findings are written to <code>audit-findings/</code> in the project root:</p>
 <pre><code class="language-text">swival&gt; /audit
-Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/` to review.
+Audit complete. 2 finding(s) written to audit-findings/. Open audit-findings/README.md to review.
 </code></pre>
+<p>That <code>README.md</code> is the entry point for a reviewer: it carries the run metadata (commit, branch, scope), a one-row-per-finding summary table grouped by severity, the run totals, and — when an audit only partially completed — a section listing each failed or pending artifact with its error code and the exact resume command. The per-finding <code>.md</code> and <code>.patch</code> files are still authoritative for the narrative and the fix; the README is what you open first.</p>
 <p>If no bugs are found:</p>
 <pre><code class="language-text">No provable security bugs or security-control failures found in Git-tracked files.
 </code></pre>
@@ -172,12 +173,14 @@ Audit complete. 2 finding(s) written to audit-findings/. Run `ls audit-findings/
 </ol>
 <p>Both are saved to the <code>audit-findings/</code> directory:</p>
 <pre><code class="language-text">audit-findings/
+  README.md
   001-command-injection-in-handler.md
   001-command-injection-in-handler.patch
   002-missing-null-check-in-parser.md
   002-missing-null-check-in-parser.patch
 </code></pre>
 <p>Each verified finding is assigned a stable index when it is first reached, and that index sticks across retries: if patch generation runs out of turns, the next attempt writes <code>002-...</code> for the same finding rather than consuming a new number.</p>
+<p>Once at least one finding's artifacts have landed, the loop rewrites <code>README.md</code> as the last step of the artifact phase. The README is regenerated on every <code>--resume</code> and <code>--regen</code> invocation, so it always reflects the current state of the run — including any newly failed retries. The per-finding files stay authoritative; the README is the reviewer's index into them.</p>
 <p>Patch failures, report exceptions, and write errors are all persisted as retryable Phase 5 state, so an audit that finishes Phase 4 but stumbles in Phase 5 stays resumable. See <a href="#options">Options</a> for <code>--patch-max-turns</code> and the targeted <code>--regen --finding</code> form.</p>
 <h2 id="report-format">Report Format</h2>
 <p>Each <code>.md</code> report follows a fixed structure:</p>

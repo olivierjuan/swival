@@ -44,17 +44,18 @@ brew uninstall swival     # if installed with Homebrew
 
 ## Provider Quick Reference
 
-| Provider      | Auth                                                | Required flags                                    |
-| ------------- | --------------------------------------------------- | ------------------------------------------------- |
-| `lmstudio`    | none                                                | none                                              |
-| `llamacpp`    | none                                                | `--provider llamacpp`                             |
-| `huggingface` | `HF_TOKEN` or `--api-key`                           | `--provider huggingface --model ORG/MODEL`        |
-| `openrouter`  | `OPENROUTER_API_KEY` or `--api-key`                 | `--provider openrouter --model MODEL`             |
-| `google`      | `--api-key`, `GEMINI_API_KEY`, or `OPENAI_API_KEY`  | `--provider google --model MODEL`                 |
-| `chatgpt`     | browser auth on first run or `CHATGPT_API_KEY`      | `--provider chatgpt --model MODEL`                |
-| `generic`     | optional `OPENAI_API_KEY`                           | `--provider generic --base-url URL --model MODEL` |
-| `bedrock`     | AWS credential chain (`AWS_PROFILE`, env vars, IAM) | `--provider bedrock --model MODEL`                |
-| `command`     | none                                                | `--provider command --model "COMMAND"`            |
+| Provider      | Auth                                                 | Required flags                                                     |
+| ------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
+| `lmstudio`    | none                                                 | none                                                               |
+| `llamacpp`    | none                                                 | `--provider llamacpp`                                              |
+| `huggingface` | `HF_TOKEN` or `--api-key`                            | `--provider huggingface --model ORG/MODEL`                         |
+| `openrouter`  | `OPENROUTER_API_KEY` or `--api-key`                  | `--provider openrouter --model MODEL`                              |
+| `google`      | `--api-key`, `GEMINI_API_KEY`, or `OPENAI_API_KEY`   | `--provider google --model MODEL`                                  |
+| `geap`        | Google Cloud ADC or `GOOGLE_APPLICATION_CREDENTIALS` | `--provider geap --gcp-project ID --location REGION --model MODEL` |
+| `chatgpt`     | browser auth on first run or `CHATGPT_API_KEY`       | `--provider chatgpt --model MODEL`                                 |
+| `generic`     | optional `OPENAI_API_KEY`                            | `--provider generic --base-url URL --model MODEL`                  |
+| `bedrock`     | AWS credential chain (`AWS_PROFILE`, env vars, IAM)  | `--provider bedrock --model MODEL`                                 |
+| `command`     | none                                                 | `--provider command --model "COMMAND"`                             |
 
 The sections below expand each provider with copy-paste commands.
 
@@ -155,6 +156,25 @@ swival "Hello world" --provider google --model gemini-2.5-flash
 Swival routes this through Google's OpenAI-compatible endpoint and will try to auto-detect the context window when `--max-context-tokens` is not set.
 
 For a deeper look at Google-specific options, see [Providers](providers.md).
+
+## Running with GEAP (Gemini Enterprise Agent Platform / Vertex AI)
+
+For Google Cloud enterprise setups, the `geap` provider routes through Vertex AI using Application Default Credentials. No API key is needed. `--provider vertexai` is accepted as an alias.
+
+`--model`, `--gcp-project`, and `--location` are required. `--gcp-project` can also come from `GOOGLE_CLOUD_PROJECT`.
+
+```sh
+gcloud auth application-default login
+swival "Hello world" \
+    --provider geap \
+    --gcp-project my-gcp-project \
+    --location us-central1 \
+    --model gemini-3.1-pro
+```
+
+For service accounts, set `GOOGLE_APPLICATION_CREDENTIALS` to the JSON key path instead of running `gcloud auth`.
+
+For a deeper look at GEAP-specific options, see [Providers](providers.md).
 
 ## Running with Any OpenAI-Compatible Server
 

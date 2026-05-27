@@ -155,6 +155,11 @@ brew uninstall swival     # if installed with Homebrew
 <td><code>--provider google --model MODEL</code></td>
 </tr>
 <tr>
+<td><code>geap</code></td>
+<td>Google Cloud ADC or <code>GOOGLE_APPLICATION_CREDENTIALS</code></td>
+<td><code>--provider geap --gcp-project ID --location REGION --model MODEL</code></td>
+</tr>
+<tr>
 <td><code>chatgpt</code></td>
 <td>browser auth on first run or <code>CHATGPT_API_KEY</code></td>
 <td><code>--provider chatgpt --model MODEL</code></td>
@@ -231,6 +236,18 @@ swival &quot;Hello world&quot; --provider google --model gemini-2.5-flash
 </code></pre>
 <p>Swival routes this through Google's OpenAI-compatible endpoint and will try to auto-detect the context window when <code>--max-context-tokens</code> is not set.</p>
 <p>For a deeper look at Google-specific options, see <a href="providers.html">Providers</a>.</p>
+<h2 id="running-with-geap-gemini-enterprise-agent-platform-vertex-ai">Running with GEAP (Gemini Enterprise Agent Platform / Vertex AI)</h2>
+<p>For Google Cloud enterprise setups, the <code>geap</code> provider routes through Vertex AI using Application Default Credentials. No API key is needed. <code>--provider vertexai</code> is accepted as an alias.</p>
+<p><code>--model</code>, <code>--gcp-project</code>, and <code>--location</code> are required. <code>--gcp-project</code> can also come from <code>GOOGLE_CLOUD_PROJECT</code>.</p>
+<pre><code class="language-sh">gcloud auth application-default login
+swival &quot;Hello world&quot; \
+    --provider geap \
+    --gcp-project my-gcp-project \
+    --location us-central1 \
+    --model gemini-3.1-pro
+</code></pre>
+<p>For service accounts, set <code>GOOGLE_APPLICATION_CREDENTIALS</code> to the JSON key path instead of running <code>gcloud auth</code>.</p>
+<p>For a deeper look at GEAP-specific options, see <a href="providers.html">Providers</a>.</p>
 <h2 id="running-with-any-openai-compatible-server">Running with Any OpenAI-Compatible Server</h2>
 <p>If you're running llama.cpp, use the <code>llamacpp</code> provider — it auto-discovers the loaded model and defaults to <code>http://127.0.0.1:8080</code>:</p>
 <pre><code class="language-sh">swival --provider llamacpp &quot;Hello world&quot;

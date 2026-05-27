@@ -134,7 +134,7 @@ NAV = [
             (
                 "providers",
                 "Providers",
-                "LM Studio, HuggingFace, OpenRouter, Google Gemini, ChatGPT Plus/Pro, AWS Bedrock, and generic server configuration",
+                "LM Studio, HuggingFace, OpenRouter, Google Gemini, Gemini Enterprise Agent Platform (Vertex AI), ChatGPT Plus/Pro, AWS Bedrock, and generic server configuration",
             ),
             ("reports", "Reports", "JSON reports for benchmarking and evaluation"),
             ("reviews", "Reviews", "External reviewer scripts for automated QA gates"),
