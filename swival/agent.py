@@ -96,6 +96,7 @@ from .tools import (
     RUN_COMMAND_TOOL,
     RUN_SHELL_COMMAND_TOOL,  # noqa: F401 — used in build_tools()
     USE_SKILL_TOOL,
+    _bg_slots_in_use,
     _memory_path,
     dispatch,
     cleanup_old_cmd_outputs,
@@ -8726,6 +8727,8 @@ def run_agent_loop(
                         )
                     if verbose:
                         fmt.storm_suppression(_tc_name, _verdict.count, _verdict.reason)
+                    if _bg_slots_in_use() > 0:
+                        time.sleep(5)
                     _suppress_msg = (
                         f"error: repeat-loop guard tripped — "
                         f"{_tc_name} was called with identical arguments "
