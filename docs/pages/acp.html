@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="ACP — Swival">
     <meta property="og:description" content="ACP: Driving Swival from ACP-aware editors like Zed and agent-client-protocol.nvim">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/acp.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="ACP — Swival">
     <meta name="twitter:description" content="ACP: Driving Swival from ACP-aware editors like Zed and agent-client-protocol.nvim">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -163,8 +164,13 @@ cat /tmp/swival-acp.log
 } | swival --acp
 </code></pre>
 <p>You will need to fill in the session id from the <code>session/new</code> response before sending the prompt; the easiest way is to do it in two passes or use a small script.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="a2a.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">A2A</span></a><a class="nav-next" href="lifecycle-hooks.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Lifecycle Hooks</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

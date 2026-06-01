@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Reviews — Swival">
     <meta property="og:description" content="Reviews: External reviewer scripts for automated QA gates">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/reviews.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Reviews — Swival">
     <meta name="twitter:description" content="Reviews: External reviewer scripts for automated QA gates">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -287,8 +288,13 @@ fi
 <pre><code class="language-sh">jq '.stats.review_rounds' report.json
 jq '.timeline[] | select(.type == &quot;review&quot;)' report.json
 </code></pre>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="reports.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Reports</span></a><a class="nav-next" href="agentfs.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">AgentFS</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

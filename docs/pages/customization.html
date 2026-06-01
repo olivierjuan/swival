@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Customization — Swival">
     <meta property="og:description" content="Customization: Config files, project instructions, system prompt overrides, tuning parameters">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/customization.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Customization — Swival">
     <meta name="twitter:description" content="Customization: Config files, project instructions, system prompt overrides, tuning parameters">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -192,7 +193,7 @@ reasoning_effort = &quot;high&quot;
 
 [profiles.router-main]
 provider = &quot;openrouter&quot;
-model = &quot;z-ai/glm-5&quot;
+model = &quot;z-ai/glm-5.1&quot;
 max_context_tokens = 131072
 
 [profiles.ollama]
@@ -234,7 +235,7 @@ swival&gt; /profile -            # revert to the profile active at session start
 <pre><code class="language-toml"># In global config: defines the base profile
 [profiles.shared]
 provider = &quot;openrouter&quot;
-model = &quot;z-ai/glm-5&quot;
+model = &quot;z-ai/glm-5.1&quot;
 max_context_tokens = 131072
 
 # In project swival.toml: overrides just the model
@@ -342,8 +343,13 @@ Don't add dependencies without asking.
 <pre><code class="language-sh">swival --max-context-tokens 65536 &quot;task&quot;
 </code></pre>
 <p>For LM Studio, this can trigger a model reload. When both <code>--max-context-tokens</code> and <code>--max-output-tokens</code> are set, <code>--max-output-tokens</code> must be less than or equal to context length.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="custom-commands.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Custom Commands</span></a><a class="nav-next" href="providers.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Providers</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

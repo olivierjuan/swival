@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Skills — Swival">
     <meta property="og:description" content="Skills: Creating and using SKILL.md-based agent skills">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/skills.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Skills — Swival">
     <meta name="twitter:description" content="Skills: Creating and using SKILL.md-based agent skills">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -157,8 +158,13 @@ and `staging` for staging.
 <p>A skill directory can also contain a program file (<code>SKILL.star</code>) that turns it into an Agent MetaSKILL — a dynamic workflow that runs bounded loops with nested model calls, command execution, and structured tracing. When a <code>SKILL.star</code> file is present (or the <code>metaskill</code> frontmatter field points to one), Swival exposes the <code>run_metaskill</code> tool alongside <code>use_skill</code>.</p>
 <p>MetaSKILLs use Starlark as their runtime language and expose three host functions: <code>ask()</code>, <code>command()</code>, and <code>trace()</code>. Local metaskills execute by default; external metaskills require <code>--metaskills all</code> or <code>metaskills = "all"</code> in config.</p>
 <p>See the <a href="metaskills.html">Agent MetaSKILLs specification</a> for the full format, host API, budgets, and authoring guide.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="command-middleware.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Command Middleware</span></a><a class="nav-next" href="metaskills.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Metaskills</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Providers — Swival">
     <meta property="og:description" content="Providers: LM Studio, HuggingFace, OpenRouter, Google Gemini, Gemini Enterprise Agent Platform (Vertex AI), ChatGPT Plus/Pro, AWS Bedrock, and generic server configuration">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/providers.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Providers — Swival">
     <meta name="twitter:description" content="Providers: LM Studio, HuggingFace, OpenRouter, Google Gemini, Gemini Enterprise Agent Platform (Vertex AI), ChatGPT Plus/Pro, AWS Bedrock, and generic server configuration">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -409,8 +410,13 @@ model = &quot;codex exec --skip-git-repo-check --full-auto --ephemeral&quot;
 Prompt cache: 6103 tokens written to cache
 </code></pre>
 <p>To opt out of explicit cache annotations, pass <code>--no-prompt-cache</code>. This only suppresses the injection; providers that cache automatically are unaffected.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="customization.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Customization</span></a><a class="nav-next" href="reports.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Reports</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

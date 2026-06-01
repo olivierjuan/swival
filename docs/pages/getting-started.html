@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Getting Started — Swival">
     <meta property="og:description" content="Getting Started: Installation, first run, what happens under the hood">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/getting-started.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Getting Started — Swival">
     <meta name="twitter:description" content="Getting Started: Installation, first run, what happens under the hood">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -221,12 +222,12 @@ cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.1
 <pre><code class="language-sh">export OPENROUTER_API_KEY=sk_or_your_token_here
 </code></pre>
 <p>Then pass the model you want to use. OpenRouter has both free and paid tiers.</p>
-<pre><code class="language-sh">swival &quot;Hello world&quot; --provider openrouter --model z-ai/glm-5
+<pre><code class="language-sh">swival &quot;Hello world&quot; --provider openrouter --model z-ai/glm-5.1
 </code></pre>
 <p>OpenRouter models vary widely in context limits, so you should set <code>--max-context-tokens</code> to match the model you chose. Without it, Swival falls back to a conservative default that may not use the full window your model supports.</p>
 <pre><code class="language-sh">swival &quot;Hello world&quot; \
     --provider openrouter \
-    --model z-ai/glm-5 \
+    --model z-ai/glm-5.1 \
     --max-context-tokens 131072
 </code></pre>
 <p>For a deeper look at OpenRouter-specific options, see <a href="providers.html">Providers</a>.</p>
@@ -280,8 +281,13 @@ swival &quot;Hello world&quot; --provider bedrock --model global.anthropic.claud
 <p>If you want to understand how Swival fits large tasks into small context windows, read <a href="context-management.html">Context Management</a>. If you want to connect external tool servers via MCP, see <a href="mcp.html">MCP</a>. If you want to browse the web, see <a href="web-browsing.html">Web Browsing</a>.</p>
 <p>If you want to connect to remote agents via the A2A protocol, or expose Swival as an A2A server, see <a href="a2a.html">A2A</a>. If you want to drive Swival from an ACP-aware editor such as Zed or the <code>agent-client-protocol.nvim</code> plugin, see <a href="acp.html">ACP</a>.</p>
 <p>If you want copy-on-write isolation so you can review and apply changes only when ready, read <a href="agentfs.html">Using Swival with AgentFS</a>. If you want to run a staged security audit over your codebase, see <a href="audit.html">Security Audit</a>.</p>
+            <nav class="page-nav" aria-label="Page navigation"><span class="nav-prev nav-empty" aria-hidden="true"></span><a class="nav-next" href="usage.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Usage</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

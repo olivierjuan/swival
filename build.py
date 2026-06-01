@@ -161,6 +161,155 @@ NAV = [
 MD_EXTENSIONS = ["fenced_code", "tables", "toc"]
 
 # ---------------------------------------------------------------------------
+# Admonition preprocessor
+# ---------------------------------------------------------------------------
+#
+# Recognise GitHub-style admonition blockquotes of the form:
+#
+#     > [!TIP] Optional title
+#     > Body line 1
+#     > Body line 2
+#
+# and rewrite them into a blockquote with class="callout callout-{kind}".
+# The CSS provides styling for: tip, note, warning, danger. Unknown kinds
+# fall through unchanged.
+
+ADMONITION_KINDS = {
+    "TIP": "tip",
+    "NOTE": "note",
+    "INFO": "note",
+    "IMPORTANT": "warning",
+    "WARNING": "warning",
+    "CAUTION": "warning",
+    "DANGER": "danger",
+}
+
+ADMONITION_KIND_TITLES = {
+    "tip": "Tip",
+    "note": "Note",
+    "warning": "Warning",
+    "danger": "Danger",
+}
+
+# Inline SVGs sized to fit a 16px-tall callout-title. Kept inline so we
+# do not depend on extra asset files.
+ADMONITION_ICONS = {
+    "tip": (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><path d="M9 18h6"></path>'
+        '<path d="M10 22h4"></path>'
+        '<path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2v.3h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z">'
+        "</path></svg>"
+    ),
+    "note": (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><circle cx="12" cy="12" r="10">'
+        '</circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>'
+    ),
+    "warning": (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">'
+        '</path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>'
+    ),
+    "danger": (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><polygon points="12 2 22 22 2 22"></polygon>'
+        '<path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>'
+    ),
+}
+
+# Matches the first line of an admonition, e.g. "[!TIP] Title" or
+# "[!TIP]" (title optional). The leading "> " of a Markdown blockquote is
+# consumed by the blockquote syntax and is not present in the rendered
+# HTML, so we do not require it here.
+ADMONITION_HEADER_RE = re.compile(
+    r"^\[!([A-Z]+)\][ ]*(.*?)\s*$"
+)
+
+
+def transform_admonitions(html: str) -> str:
+    """Walk the HTML and rewrite `> [!KIND] Title\\n> ...` blockquote bodies
+    into `<blockquote class="callout callout-{kind}">` with a callout-title.
+
+    Markdown already converts `> ...` into `<blockquote>...</blockquote>`.
+    Inside that blockquote the first paragraph or the literal text holds
+    the first line. We detect admonitions by looking for the first
+    paragraph of a blockquote, matching the header text in the format
+    `[!KIND] Title`, and rewriting both the wrapper class and that
+    paragraph's content.
+    """
+
+    def parse_kinds(text: str) -> tuple[str, str] | None:
+        m = ADMONITION_HEADER_RE.match(text)
+        if not m:
+            return None
+        kind_token = m.group(1).upper()
+        if kind_token not in ADMONITION_KINDS:
+            return None
+        return ADMONITION_KINDS[kind_token], m.group(2)
+
+    # When a blockquote has multiple lines, python-markdown collapses them
+    # into a single <p> separated by "\n". Split that single <p> into a
+    # header paragraph and a body paragraph so the admonition can be
+    # rendered with a styled title.
+    def split_paragraph(p_match: re.Match) -> str:
+        attrs, body = p_match.group(1), p_match.group(2)
+        lines = body.split("\n")
+        if not lines:
+            return p_match.group(0)
+        first = lines[0].rstrip()
+        rest = "\n".join(lines[1:]).strip()
+        if rest:
+            return f"<p{attrs}>{first}</p>\n<p{attrs}>{rest}</p>"
+        return f"<p{attrs}>{first}</p>"
+
+    split_p = re.compile(r"<p([^>]*)>([\s\S]*?)</p>")
+
+    def rewrite(match: re.Match) -> str:
+        attrs = match.group(1) or ""
+        inner = match.group(2) or ""
+
+        # First, split any <p>...</p> with a header line at the top.
+        inner = split_p.sub(split_paragraph, inner, count=1)
+
+        # Pull off the first <p>...</p> if it is the admonition header.
+        first_p = re.match(r"\s*(<p>(.*?)</p>)\s*", inner, flags=re.DOTALL)
+        if not first_p:
+            return match.group(0)
+        parsed = parse_kinds(first_p.group(2).strip())
+        if not parsed:
+            return match.group(0)
+        kind, user_title = parsed
+        # Strip leading/trailing emphasis markers like <em> or trailing colons
+        title = user_title.strip().rstrip(":").strip()
+        if not title:
+            title = ADMONITION_KIND_TITLES[kind]
+        title_html = (
+            f'<div class="callout-title">{ADMONITION_ICONS[kind]}<span>{title}</span></div>'
+        )
+        rest = inner[first_p.end():].lstrip()
+        # Add our classes onto the wrapper
+        new_class = f'callout callout-{kind}'
+        if 'class="' in attrs:
+            attrs = re.sub(
+                r'class="([^"]*)"',
+                lambda m: f'class="{m.group(1)} {new_class}"',
+                attrs,
+                count=1,
+            )
+        else:
+            attrs = f' class="{new_class}"' + attrs
+        return f"<blockquote{attrs}>{title_html}{rest}</blockquote>"
+
+    pattern = re.compile(r"<blockquote([^>]*)>([\s\S]*?)</blockquote>")
+    return pattern.sub(rewrite, html)
+
+
+# ---------------------------------------------------------------------------
 # HTML templates
 # ---------------------------------------------------------------------------
 
@@ -179,10 +328,61 @@ def sidebar_html(active_slug: str) -> str:
     return "\n".join(parts)
 
 
+# Flat slug list, in display order, for prev/next navigation.
+_FLAT_SLUGS: list[str] | None = None
+
+
+def flat_slugs() -> list[str]:
+    global _FLAT_SLUGS
+    if _FLAT_SLUGS is None:
+        _FLAT_SLUGS = [slug for _g, pages in NAV for slug, _t, _d in pages]
+    return _FLAT_SLUGS
+
+
+def page_title_for(slug: str) -> str:
+    for _g, pages in NAV:
+        for s, t, _d in pages:
+            if s == slug:
+                return t
+    return slug
+
+
+def prev_next_html(slug: str) -> str:
+    slugs = flat_slugs()
+    try:
+        idx = slugs.index(slug)
+    except ValueError:
+        return ""
+    prev_slug = slugs[idx - 1] if idx > 0 else None
+    next_slug = slugs[idx + 1] if idx + 1 < len(slugs) else None
+    parts = ['<nav class="page-nav" aria-label="Page navigation">']
+    if prev_slug:
+        parts.append(
+            f'<a class="nav-prev" href="{prev_slug}.html">'
+            f'<span class="nav-label">&larr; Previous</span>'
+            f'<span class="nav-title">{page_title_for(prev_slug)}</span>'
+            f"</a>"
+        )
+    else:
+        parts.append('<span class="nav-prev nav-empty" aria-hidden="true"></span>')
+    if next_slug:
+        parts.append(
+            f'<a class="nav-next" href="{next_slug}.html">'
+            f'<span class="nav-label">Next &rarr;</span>'
+            f'<span class="nav-title">{page_title_for(next_slug)}</span>'
+            f"</a>"
+        )
+    else:
+        parts.append('<span class="nav-next nav-empty" aria-hidden="true"></span>')
+    parts.append("</nav>")
+    return "".join(parts)
+
+
 def docs_page_html(title: str, desc: str, body: str, slug: str) -> str:
     nav = sidebar_html(slug)
     page_url = f"{BASE_URL}/pages/{slug}.html"
     meta_desc = f"{title}: {desc}" if desc else f"{title} — Swival documentation"
+    page_nav = prev_next_html(slug)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -194,12 +394,12 @@ def docs_page_html(title: str, desc: str, body: str, slug: str) -> str:
     <meta property="og:type" content="article">
     <meta property="og:title" content="{title} — Swival">
     <meta property="og:description" content="{meta_desc}">
-    <meta property="og:image" content="{BASE_URL}/img/logo.png">
+    <meta property="og:image" content="{BASE_URL}/img/og.png">
     <meta property="og:url" content="{page_url}">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="{title} — Swival">
     <meta name="twitter:description" content="{meta_desc}">
-    <meta name="twitter:image" content="{BASE_URL}/img/logo.png">
+    <meta name="twitter:image" content="{BASE_URL}/img/og.png">
     <script type="application/ld+json">
     {{
         "@context": "https://schema.org",
@@ -226,6 +426,7 @@ def docs_page_html(title: str, desc: str, body: str, slug: str) -> str:
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -237,14 +438,19 @@ def docs_page_html(title: str, desc: str, body: str, slug: str) -> str:
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             {nav}
         </aside>
         <article class="docs-content">
             {body}
+            {page_nav}
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">
@@ -291,7 +497,10 @@ def docs_page_html(title: str, desc: str, body: str, slug: str) -> str:
 
 def docs_hub_html() -> str:
     nav = sidebar_html("")
-    body_parts = ["<h1>Documentation</h1>"]
+    body_parts = ['<h1 id="documentation">Documentation</h1>']
+    body_parts.append(
+        '<p class="docs-hub-lede">Everything you need to install, configure, and get the most out of Swival.</p>'
+    )
     for group_name, pages in NAV:
         body_parts.append('<div class="docs-hub-group">')
         body_parts.append(f"<h2>{group_name}</h2>")
@@ -315,12 +524,12 @@ def docs_hub_html() -> str:
     <meta property="og:type" content="website">
     <meta property="og:title" content="Documentation — Swival">
     <meta property="og:description" content="Swival documentation: guides for installation, configuration, providers, MCP, A2A, security audits, and the Python API.">
-    <meta property="og:image" content="{BASE_URL}/img/logo.png">
+    <meta property="og:image" content="{BASE_URL}/img/og.png">
     <meta property="og:url" content="{BASE_URL}/pages/">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Documentation — Swival">
     <meta name="twitter:description" content="Swival documentation: guides for installation, configuration, providers, MCP, A2A, security audits, and the Python API.">
-    <meta name="twitter:image" content="{BASE_URL}/img/logo.png">
+    <meta name="twitter:image" content="{BASE_URL}/img/og.png">
     <link rel="icon" href="../favicon.ico">
     <link rel="stylesheet" href="../css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -328,6 +537,7 @@ def docs_hub_html() -> str:
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -339,14 +549,18 @@ def docs_hub_html() -> str:
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             {nav}
         </aside>
         <article class="docs-content">
             {body}
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">
@@ -487,6 +701,89 @@ def generate_favicon(logo_path: Path, out_path: Path) -> None:
     img.save(out_path, format="ICO", sizes=[(32, 32)])
 
 
+def generate_og_image(logo_path: Path, out_path: Path) -> None:
+    """Generate a 1200x630 Open Graph card with a gradient background,
+    the brand mark, and the tagline. Pillow only — no system fonts required."""
+    from PIL import ImageDraw, ImageFont
+
+    W, H = 1200, 630
+    grad = Image.new("RGB", (W, H), (15, 23, 42))
+    px = grad.load()
+    for y in range(H):
+        t = y / (H - 1)
+        r = int(15 + (29 - 15) * t)
+        g = int(23 + (78 - 23) * t)
+        b = int(42 + (216 - 42) * t)
+        for x in range(W):
+            px[x, y] = (r, g, b)
+
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    for r, a in [(600, 25), (450, 40), (300, 60), (150, 90)]:
+        gd.ellipse((-200, -200, r, r), fill=(96, 165, 250, a))
+    for r, a in [(600, 25), (450, 40), (300, 55), (150, 80)]:
+        gd.ellipse((W - r, H - r, W + 200, H + 200), fill=(251, 146, 60, a))
+    img = Image.alpha_composite(grad.convert("RGBA"), glow).convert("RGB")
+    draw = ImageDraw.Draw(img)
+
+    # Pick a bold + regular font from common system locations. Falls back
+    # silently to no text if none are available; the gradient alone is still
+    # a usable OG image.
+    font_pairs = [
+        (
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ),
+        (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ),
+        (
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ),
+        (
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ),
+    ]
+    title_font = None
+    sub_font = None
+    for bold, regular in font_pairs:
+        try:
+            title_font = ImageFont.truetype(bold, 96)
+            sub_font = ImageFont.truetype(regular, 36)
+            break
+        except OSError:
+            continue
+
+    pad = 80
+    if logo_path.exists():
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+            logo.thumbnail((220, 220), Image.LANCZOS)
+            img.paste(logo, (pad, pad), logo)
+        except Exception:
+            pass
+
+    if title_font is not None:
+        draw.text((pad, H - 260), "Swival", fill=(255, 255, 255), font=title_font)
+        draw.text(
+            (pad, H - 140),
+            "A coding agent for any model.",
+            fill=(226, 232, 240),
+            font=sub_font,
+        )
+        draw.text(
+            (pad, H - 90),
+            "Free, open-source, and easy to set up.",
+            fill=(148, 163, 184),
+            font=sub_font,
+        )
+
+    img.save(out_path, format="PNG", optimize=True)
+
+
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
@@ -547,6 +844,7 @@ def build() -> bool:
             md_text = md_path.read_text(encoding="utf-8")
             body_html = md_converter.convert(md_text)
             body_html = rewrite_md_links(body_html)
+            body_html = transform_admonitions(body_html)
             full_html = docs_page_html(title, desc, body_html, slug)
 
             out_path = WWW_DOCS / f"{slug}.html"
@@ -574,6 +872,14 @@ def build() -> bool:
         favicon_path = WWW / "favicon.ico"
         generate_favicon(logo_src, favicon_path)
         print("  favicon.ico generated")
+
+    # Generate Open Graph card
+    og_path = WWW_IMG / "og.png"
+    try:
+        generate_og_image(logo_src, og_path)
+        print("  og.png generated (1200x630)")
+    except Exception as exc:
+        print(f"WARNING: og.png generation failed: {exc}", file=sys.stderr)
 
     # Generate sitemap.xml
     lastmod = _git_lastmod()

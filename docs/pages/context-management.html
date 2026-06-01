@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Context Management — Swival">
     <meta property="og:description" content="Context Management: How Swival fits large tasks into small context windows">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/context-management.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Context Management — Swival">
     <meta name="twitter:description" content="Context Management: How Swival fits large tasks into small context windows">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -194,8 +195,13 @@
 <p><code>--proactive-summaries</code> enables the periodic checkpoint summarization described above. Recommended for long-running sessions where the agent will go through many investigation and implementation cycles.</p>
 <p><code>--max-output-tokens</code> controls the maximum generation budget per LLM call. Before every call, Swival dynamically shrinks this to fit the remaining context space, so you don't need to tune it carefully — but setting it to a reasonable value (the default is 32,768) helps Swival estimate budgets accurately.</p>
 <p>These can be set via CLI flags, project config (<code>swival.toml</code>), or global config (<code>~/.config/swival/config.toml</code>). See <a href="usage.html">Usage</a> for the full flag reference.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="goal.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Goals</span></a><a class="nav-next" href="open-models.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Not Just for Frontier Models</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

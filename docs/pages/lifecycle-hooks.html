@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Lifecycle Hooks — Swival">
     <meta property="og:description" content="Lifecycle Hooks: Run commands at startup and exit to sync .swival/ state with remote storage">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/lifecycle-hooks.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Lifecycle Hooks — Swival">
     <meta name="twitter:description" content="Lifecycle Hooks: Run commands at startup and exit to sync .swival/ state with remote storage">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -394,8 +395,13 @@ echo &quot;$HF_NS/swival-$HASH&quot;
 <p><strong>A2A serve:</strong> Hooks are excluded from <code>--serve</code> in this release. Per-session hooks for long-lived A2A servers need different lifecycle semantics and will be addressed separately.</p>
 <p><strong>AgentFS sandbox:</strong> Hooks run in the same process context as Swival. If you are running inside an AgentFS sandbox, the hook script needs network access to reach the remote storage backend.</p>
 <p><strong>Reports:</strong> Lifecycle events (startup and exit) are recorded in the report timeline when <code>--report</code> is set. Each event includes its exit code, duration, and any error message. A fail-closed exit hook failure rewrites the report with <code>outcome: "error"</code>.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="acp.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">ACP</span></a><a class="nav-next" href="custom-commands.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Custom Commands</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

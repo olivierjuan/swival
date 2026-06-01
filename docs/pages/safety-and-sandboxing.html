@@ -9,12 +9,12 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="Safety & Sandboxing — Swival">
     <meta property="og:description" content="Safety & Sandboxing: Path resolution, symlink protection, command whitelisting">
-    <meta property="og:image" content="https://swival.dev/img/logo.png">
+    <meta property="og:image" content="https://swival.dev/img/og.png">
     <meta property="og:url" content="https://swival.dev/pages/safety-and-sandboxing.html">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Safety & Sandboxing — Swival">
     <meta name="twitter:description" content="Safety & Sandboxing: Path resolution, symlink protection, command whitelisting">
-    <meta name="twitter:image" content="https://swival.dev/img/logo.png">
+    <meta name="twitter:image" content="https://swival.dev/img/og.png">
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -41,6 +41,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
         <div class="header-inner">
             <a href="../" class="header-logo">
@@ -52,7 +53,7 @@
             </nav>
         </div>
     </header>
-    <div class="docs-layout">
+    <main id="main" class="docs-layout-3col">
         <aside class="sidebar">
             <div class="sidebar-section">
 <h4>Basics</h4>
@@ -266,8 +267,13 @@ swival --yolo --files none &quot;commands only, no file access&quot;
 <p>MCP tool output uses higher thresholds: 20 KB inline, with larger output written to <code>.swival/</code> and hard-capped at 10 MB before writing. MCP error output is inline-capped at 20 KB without file save.</p>
 <p>URL fetch output is capped at 50 KB inline, with larger output saved to files.</p>
 <p>Response history is written to <code>.swival/HISTORY.md</code>, which is capped at 500 KB. When a new entry would exceed the cap, the oldest entries are trimmed to make room.</p>
+            <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="open-models.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Not Just for Frontier Models</span></a><a class="nav-next" href="secrets.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Secret Encryption</span></a></nav>
         </article>
-    </div>
+        <aside class="page-toc" aria-label="On this page">
+            <p class="page-toc-title">On this page</p>
+            <div class="page-toc-list"></div>
+        </aside>
+    </main>
     <footer class="site-footer">
         <div class="footer-inner">
             <div class="footer-grid">

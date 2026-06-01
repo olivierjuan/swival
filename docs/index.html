@@ -11,14 +11,14 @@
 		<meta property="og:type" content="website">
 		<meta property="og:title" content="Swival — A coding agent for any model">
 		<meta property="og:description" content="A CLI coding agent built to be reliable with smaller models, including local ones. Designed for tight context windows and limited resources. Works with LM Studio, llama.cpp, HuggingFace, OpenRouter, Google Gemini, Vertex AI, ChatGPT Plus/Pro, AWS Bedrock, and any OpenAI-compatible server.">
-		<meta property="og:image" content="https://swival.dev/img/logo.png">
+		<meta property="og:image" content="https://swival.dev/img/og.png">
 		<meta property="og:url" content="https://swival.dev/">
 
 		<!-- Twitter Card -->
 		<meta name="twitter:card" content="summary_large_image">
 		<meta name="twitter:title" content="Swival — A coding agent for any model">
 		<meta name="twitter:description" content="A CLI coding agent built to be reliable with smaller models, including local ones. Designed for tight context windows and limited resources. Works with LM Studio, llama.cpp, HuggingFace, OpenRouter, Google Gemini, Vertex AI, ChatGPT Plus/Pro, AWS Bedrock, and any OpenAI-compatible server.">
-		<meta name="twitter:image" content="https://swival.dev/img/logo.png">
+		<meta name="twitter:image" content="https://swival.dev/img/og.png">
 
 		<script type="application/ld+json">
 		{
@@ -45,6 +45,7 @@
 		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 	</head>
 	<body>
+		<a class="skip-link" href="#main">Skip to content</a>
 		<header class="site-header">
 			<div class="header-inner">
 				<a href="./" class="header-logo">
@@ -57,7 +58,7 @@
 			</div>
 		</header>
 
-		<main>
+		<main id="main">
 			<section class="hero">
 				<div class="hero-orb hero-orb-1" aria-hidden="true"></div>
 				<div class="hero-orb hero-orb-2" aria-hidden="true"></div>
@@ -140,6 +141,34 @@
 						<div class="feature-card" data-animate>
 							<h3>Skills, MetaSKILLs, and MCP</h3>
 							<p>Extend the agent with SKILL.md-based skills, dynamic workflows written in a safe Python subset via MetaSKILLs, and MCP servers. Small and hackable: pure Python with no framework. Easy to read and modify.</p>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="spotlight" data-animate>
+				<div class="spotlight-inner">
+					<h2 class="section-title">Built for the long run</h2>
+					<p class="section-subtitle">Two things we obsess over so the agent can stay focused on your task instead of the environment around it.</p>
+					<div class="spotlight-grid">
+						<div class="spotlight-card spotlight-blue">
+							<span class="icon" aria-hidden="true">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M12 2a10 10 0 1 0 4 19.2"></path>
+									<path d="M12 6v6l4 2"></path>
+								</svg>
+							</span>
+							<h3>Context that survives compaction</h3>
+							<p>Pre-flight pruning, graduated compaction, and persistent think / todo / snapshot state mean the agent keeps working through long sessions &mdash; even on small models with tight context windows. <a href="pages/context-management.html">Learn how &rarr;</a></p>
+						</div>
+						<div class="spotlight-card spotlight-orange">
+							<span class="icon" aria-hidden="true">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z"></path>
+								</svg>
+							</span>
+							<h3>Safety you can actually configure</h3>
+							<p>Workspace-only file access by default, command whitelists, OS-level sandboxes via AgentFS or <a href="pages/nono.html">nono</a>, and format-preserving secret encryption. <a href="pages/safety-and-sandboxing.html">Read the guide &rarr;</a></p>
 						</div>
 					</div>
 				</div>
@@ -254,6 +283,17 @@ answer = swival.run(
 				<div class="calibra-inner">
 					<h2>Benchmark and evaluate</h2>
 					<p>Run evals with <a href="https://calibra.swival.dev">Calibra</a> &mdash; Swival's companion for benchmarking and evaluation. Compare models, settings, skills, and MCP servers on real coding tasks.</p>
+				</div>
+			</section>
+
+			<section class="cta-band" data-animate>
+				<div class="cta-inner">
+					<h2>Get started in one command</h2>
+					<p>Install Swival, point it at any OpenAI-compatible model, and ship a real change in minutes. No telemetry, no signup, no lock-in.</p>
+					<div class="cta-actions">
+						<a href="#quickstart" class="btn btn-primary">Get Started</a>
+						<a href="https://github.com/swival/swival" class="btn btn-secondary">Star on GitHub</a>
+					</div>
 				</div>
 			</section>
 		</main>
