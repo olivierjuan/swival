@@ -858,6 +858,40 @@ class TestTailToViewport:
     def test_empty_line_is_one_row(self):
         assert fmt._wrap_to_rows("", 10) == [""]
 
+    def test_blank_run_collapses_to_single(self):
+        text = "a" + "\n" * 6 + "b"
+        out = fmt._tail_to_viewport(text, width=80, height=10).plain
+        assert out.split("\n") == ["a", "", "b"]
+
+    def test_trailing_blanks_stripped(self):
+        text = "real content" + "\n" * 5
+        out = fmt._tail_to_viewport(text, width=80, height=10).plain
+        assert out == "real content"
+
+    def test_blank_run_keeps_content_in_viewport(self):
+        # Without collapsing, the blank run would push "a" off a 3-row viewport
+        # and leave "b" trailing empties; collapsing keeps both visible.
+        out = fmt._tail_to_viewport("a\n\n\n\n\n\nb", width=80, height=3).plain
+        assert out.split("\n") == ["a", "", "b"]
+
+
+class TestCollapseBlankRows:
+    def test_empty_input(self):
+        assert fmt._collapse_blank_rows([]) == []
+
+    def test_all_blank_collapses_to_empty(self):
+        assert fmt._collapse_blank_rows(["", "  ", ""]) == []
+
+    def test_no_blanks_unchanged(self):
+        rows = ["a", "b", "c"]
+        assert fmt._collapse_blank_rows(rows) == rows
+
+    def test_interior_run_kept_as_one(self):
+        assert fmt._collapse_blank_rows(["a", "", "", "", "b"]) == ["a", "", "b"]
+
+    def test_leading_blanks_collapse(self):
+        assert fmt._collapse_blank_rows(["", "", "a"]) == ["", "a"]
+
 
 class TestStreamRaw:
     def test_non_tty_yields_noop(self):

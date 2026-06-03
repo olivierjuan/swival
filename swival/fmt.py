@@ -439,18 +439,42 @@ def _wrap_to_rows(line: str, width: int) -> list[str]:
     return rows
 
 
+def _collapse_blank_rows(rows: list[str]) -> list[str]:
+    """Collapse runs of blank rows to a single blank and drop trailing blanks.
+
+    Models routinely emit long runs of empty lines. Left alone they fill the
+    streaming viewport with nothing, pushing real content off the top and
+    sometimes leaving the region visually empty. A row counts as blank when it
+    has no non-whitespace content, which also catches whitespace-only wrapped
+    rows. Paragraph separation is preserved by keeping one blank per run.
+    """
+    out: list[str] = []
+    prev_blank = False
+    for row in rows:
+        blank = not row.strip()
+        if blank and prev_blank:
+            continue
+        out.append(row)
+        prev_blank = blank
+    while out and not out[-1].strip():
+        out.pop()
+    return out
+
+
 def _tail_to_viewport(text: str, width: int, height: int) -> Text:
     """Return the last *height* visual rows of *text*, wrapped at *width*.
 
     Tails by visual rows rather than source lines, so a single paragraph that
     wraps to more than *height* rows is trimmed to its final rows instead of
     overflowing. This keeps the newest streamed output on screen; Rich's own
-    overflow handling would crop from the top instead.
+    overflow handling would crop from the top instead. Blank runs are collapsed
+    before tailing so the visible window stays dense with real content.
     """
     width = max(width, 1)
     rows: list[str] = []
     for line in text.split("\n"):
         rows.extend(_wrap_to_rows(line, width))
+    rows = _collapse_blank_rows(rows)
     tail = rows[-max(height, 1) :]
     return Text("\n".join(tail), style="dim")
 
