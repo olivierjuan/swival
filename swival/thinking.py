@@ -125,10 +125,7 @@ class ThinkingState:
         thought = args.get("thought", "")
 
         # Auto-default optional numbering params
-        if "thought_number" in args:
-            thought_number = args["thought_number"]
-        else:
-            thought_number = len(self.history) + 1
+        thought_number = args.get("thought_number", len(self.history) + 1)
 
         if "total_thoughts" in args:
             total_thoughts = args["total_thoughts"]

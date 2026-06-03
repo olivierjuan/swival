@@ -7,8 +7,6 @@ import secrets
 import time
 from dataclasses import dataclass, field
 
-from . import fmt
-
 
 GOAL_RECAP_PREFIX = "[goal state]"
 GOAL_CONTINUATION_PREFIX = "[goal continuation]"
@@ -168,14 +166,11 @@ class GoalState:
             # Resume — reset accounting baseline.
             self.active_started_at = time.monotonic()
             self.continuation_suppressed = False
-        elif status in (GoalStatus.PAUSED, GoalStatus.BUDGET_LIMITED):
+        else:
             # Stop the wall-clock counter; preserve tokens.
             self._roll_in_wall_clock()
             self.active_started_at = None
-        elif status == GoalStatus.COMPLETE:
-            self._roll_in_wall_clock()
-            self.active_started_at = None
-            if prev != GoalStatus.COMPLETE:
+            if status == GoalStatus.COMPLETE and prev != GoalStatus.COMPLETE:
                 self.completed_count += 1
 
     def pause(self) -> bool:
@@ -577,16 +572,3 @@ def goal_set_message(action: str, record: GoalRecord) -> str:
     if action == "budget_limited":
         return "goal token budget reached — wrap-up mode"
     return f"goal {action}"
-
-
-def emit_event(verbose: bool, action: str, record: GoalRecord | None) -> None:
-    if not verbose or record is None and action != "cleared":
-        # Always show "cleared" even for missing record? No — caller controls.
-        if record is None and action == "cleared":
-            fmt.info("goal cleared")
-            return
-        if record is None:
-            return
-    if record is None:
-        return
-    fmt.info(goal_set_message(action, record))
