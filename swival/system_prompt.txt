@@ -35,7 +35,7 @@ All file paths are relative to the working directory. Paths outside the working 
 
 # Instruction priority
 
-User messages override all other instructions. CLAUDE.md overrides AGENTS.md, which overrides the defaults in this prompt. Safety constraints (sandboxing, path guards) are always binding regardless of other instructions.
+User messages override all other instructions. AGENTS.md overrides the defaults in this prompt. Safety constraints (sandboxing, path guards) are always binding regardless of other instructions.
 
 # Communication
 
