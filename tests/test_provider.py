@@ -1,14 +1,20 @@
 """Tests for provider routing, model normalization, CLI validation, and path isolation."""
 
+import contextlib
+import json
 import os
 import sys
 import types
+import urllib.error
 
 import pytest
 from unittest.mock import patch, MagicMock
 
+from swival import agent
 from swival.agent import (
     call_llm,
+    discover_generic_context_length,
+    discover_llamacpp_context_length,
     resolve_provider,
     _fix_orphaned_tool_calls,
     _msg_to_dict,
@@ -20,6 +26,27 @@ from swival.agent import (
 )
 from swival.config import ConfigError
 from swival.report import AgentError
+
+
+def _patch_urlopen_json(monkeypatch, payload):
+    """Make urllib.request.urlopen yield *payload* as a JSON response body."""
+
+    @contextlib.contextmanager
+    def _fake_urlopen(req, timeout=10):
+        resp = MagicMock()
+        resp.read.return_value = json.dumps(payload).encode()
+        yield resp
+
+    monkeypatch.setattr(agent.urllib.request, "urlopen", _fake_urlopen)
+
+
+def _patch_urlopen_error(monkeypatch):
+    """Make urllib.request.urlopen raise, simulating an unreachable server."""
+
+    def _boom(req, timeout=10):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(agent.urllib.request, "urlopen", _boom)
 
 
 # ---------------------------------------------------------------------------
@@ -1094,8 +1121,83 @@ class TestProviderPathIsolation:
 # ---------------------------------------------------------------------------
 
 
+class TestDiscoverGenericContextLength:
+    """Reading the context window from an OpenAI-compatible /v1/models list."""
+
+    def test_matches_model_by_id(self, monkeypatch):
+        _patch_urlopen_json(
+            monkeypatch,
+            {
+                "data": [
+                    {"id": "small", "max_model_len": 8192},
+                    {"id": "big", "max_model_len": 262144},
+                ]
+            },
+        )
+        assert discover_generic_context_length("http://h/v1", "big", False) == 262144
+
+    def test_single_entry_fallback_when_no_id_match(self, monkeypatch):
+        _patch_urlopen_json(
+            monkeypatch, {"data": [{"id": "only", "context_length": 4096}]}
+        )
+        assert discover_generic_context_length("http://h/v1", "default", False) == 4096
+
+    def test_no_fallback_with_multiple_entries(self, monkeypatch):
+        _patch_urlopen_json(
+            monkeypatch,
+            {
+                "data": [
+                    {"id": "a", "max_model_len": 1},
+                    {"id": "b", "max_model_len": 2},
+                ]
+            },
+        )
+        assert discover_generic_context_length("http://h/v1", "default", False) is None
+
+    def test_alternate_keys(self, monkeypatch):
+        _patch_urlopen_json(
+            monkeypatch, {"data": [{"id": "m", "context_window": 32768}]}
+        )
+        assert discover_generic_context_length("http://h/v1", "m", False) == 32768
+
+    def test_missing_field_returns_none(self, monkeypatch):
+        _patch_urlopen_json(monkeypatch, {"data": [{"id": "m"}]})
+        assert discover_generic_context_length("http://h/v1", "m", False) is None
+
+    def test_unreachable_server_returns_none(self, monkeypatch):
+        _patch_urlopen_error(monkeypatch)
+        assert discover_generic_context_length("http://h/v1", "m", False) is None
+
+
+class TestDiscoverLlamacppContextLength:
+    """Reading n_ctx from a llama.cpp server's /props endpoint."""
+
+    def test_reads_default_generation_settings(self, monkeypatch):
+        _patch_urlopen_json(
+            monkeypatch, {"default_generation_settings": {"n_ctx": 16384}}
+        )
+        assert discover_llamacpp_context_length("http://h:8080", False) == 16384
+
+    def test_reads_top_level_n_ctx(self, monkeypatch):
+        _patch_urlopen_json(monkeypatch, {"n_ctx": 8192})
+        assert discover_llamacpp_context_length("http://h:8080", False) == 8192
+
+    def test_missing_returns_none(self, monkeypatch):
+        _patch_urlopen_json(monkeypatch, {"model_path": "x.gguf"})
+        assert discover_llamacpp_context_length("http://h:8080", False) is None
+
+    def test_unreachable_returns_none(self, monkeypatch):
+        _patch_urlopen_error(monkeypatch)
+        assert discover_llamacpp_context_length("http://h:8080", False) is None
+
+
 class TestGenericProviderRouting:
     """Verify call_llm routing for the generic provider."""
+
+    @pytest.fixture(autouse=True)
+    def _offline_context_probe(self, monkeypatch):
+        """Stub the context-window probe so routing tests never hit a server."""
+        monkeypatch.setattr(agent, "discover_generic_context_length", lambda *a: None)
 
     def _mock_response(self):
         choice = MagicMock()
@@ -1170,6 +1272,34 @@ class TestGenericProviderRouting:
             "generic", "m", None, "http://host:9000/v1/", None, False
         )
         assert api_base == "http://host:9000/v1"
+
+    def test_resolve_provider_discovers_context_length(self, monkeypatch):
+        """When max_context_tokens is unset, generic reads it from /v1/models."""
+        monkeypatch.setattr(
+            agent,
+            "discover_generic_context_length",
+            lambda api_base, model_id, verbose: 262144,
+        )
+        _, _, _, context_length, _ = resolve_provider(
+            "generic", "m", None, "http://host:9000", None, False
+        )
+        assert context_length == 262144
+
+    def test_resolve_provider_explicit_context_skips_discovery(self, monkeypatch):
+        """An explicit max_context_tokens must not trigger discovery."""
+        called = False
+
+        def _spy(*a, **k):
+            nonlocal called
+            called = True
+            return 999
+
+        monkeypatch.setattr(agent, "discover_generic_context_length", _spy)
+        _, _, _, context_length, _ = resolve_provider(
+            "generic", "m", None, "http://host:9000", 4096, False
+        )
+        assert context_length == 4096
+        assert called is False
 
     def test_generic_no_key_uses_none_placeholder(self):
         with patch("litellm.completion") as mock_comp:
@@ -2573,6 +2703,12 @@ class TestSpecialTokenEscaping:
 class TestLlamacppProviderRouting:
     """Verify resolve_provider and call_llm routing for the llamacpp provider."""
 
+    @pytest.fixture(autouse=True)
+    def _offline_context_probe(self, monkeypatch):
+        """Stub the context-window probes so routing tests never hit a server."""
+        monkeypatch.setattr(agent, "discover_llamacpp_context_length", lambda *a: None)
+        monkeypatch.setattr(agent, "discover_generic_context_length", lambda *a: None)
+
     def test_default_base_url(self):
         with patch("swival.agent.discover_llamacpp_model", return_value="test-model"):
             model_id, api_base, key, ctx, kwargs = resolve_provider(
@@ -2603,9 +2739,16 @@ class TestLlamacppProviderRouting:
         assert model_id == "my-model"
         assert api_base == "http://127.0.0.1:8080/v1"
 
-    def test_context_length_none_by_default(self):
+    def test_context_length_none_when_undiscoverable(self):
         _, _, _, ctx, _ = resolve_provider("llamacpp", "m", None, None, None, False)
         assert ctx is None
+
+    def test_context_length_from_discovery(self, monkeypatch):
+        monkeypatch.setattr(
+            agent, "discover_llamacpp_context_length", lambda *a: 262144
+        )
+        _, _, _, ctx, _ = resolve_provider("llamacpp", "m", None, None, None, False)
+        assert ctx == 262144
 
     def test_context_length_from_flag(self):
         _, _, _, ctx, _ = resolve_provider("llamacpp", "m", None, None, 32768, False)

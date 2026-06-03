@@ -3411,6 +3411,86 @@ def discover_llamacpp_model(base_url, verbose):
     return None
 
 
+def _fetch_json(url, verbose):
+    """GET *url* and parse the JSON body, returning None on any failure.
+
+    Shared by the best-effort context-window probes against local model
+    servers: the timeout is short because these endpoints are local and the
+    result is optional, so a slow or absent server must not stall startup.
+    """
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, json.JSONDecodeError, ValueError) as e:
+        if verbose:
+            fmt.model_info(f"Could not discover context window from {url}: {e}")
+        return None
+
+
+def discover_generic_context_length(api_base, model_id, verbose):
+    """Read a model's context window from an OpenAI-compatible /v1/models list.
+
+    Servers such as mlx_lm, vLLM, and SGLang advertise the loaded context size
+    per model. Different servers use different keys for it, so we probe the
+    common ones. Returns None on any failure or when the field is absent, since
+    the generic provider may point at a server that exposes none of this.
+    """
+    url = f"{api_base.rstrip('/')}/models"
+    if verbose:
+        fmt.model_info(f"Querying {url} for the model's context window...")
+    data = _fetch_json(url, verbose)
+    if data is None:
+        return None
+
+    entries = data.get("data") or []
+    match = next((e for e in entries if e.get("id") == model_id), None)
+    if match is None and len(entries) == 1:
+        match = entries[0]
+    if match is None:
+        return None
+
+    for key in (
+        "max_model_len",
+        "max_context_length",
+        "context_length",
+        "context_window",
+    ):
+        value = match.get(key)
+        if isinstance(value, int) and value > 0:
+            if verbose:
+                fmt.model_info(f"Discovered context window: {value:,} tokens ({key})")
+            return value
+    return None
+
+
+def discover_llamacpp_context_length(base_url, verbose):
+    """Read the loaded context size from a llama.cpp server's /props endpoint.
+
+    llama-server reports the runtime context in
+    default_generation_settings.n_ctx (and an older top-level n_ctx). This is
+    the size the server was actually launched with, which is what we want for
+    budgeting. Returns None on any failure.
+    """
+    url = f"{base_url.rstrip('/')}/props"
+    if verbose:
+        fmt.model_info(f"Querying {url} for the model's context window...")
+    data = _fetch_json(url, verbose)
+    if data is None:
+        return None
+
+    candidates = (
+        data.get("default_generation_settings", {}).get("n_ctx"),
+        data.get("n_ctx"),
+    )
+    for value in candidates:
+        if isinstance(value, int) and value > 0:
+            if verbose:
+                fmt.model_info(f"Discovered context window: {value:,} tokens (n_ctx)")
+            return value
+    return None
+
+
 def configure_context(base_url, model_key, requested_context, current_context, verbose):
     """Reload the model with a different context size if needed."""
     if requested_context == current_context:
@@ -6328,24 +6408,29 @@ def resolve_provider(
             )
         api_base = base_url
         model_id = model
-        context_length = max_context_tokens
         resolved_key = api_key or os.environ.get("HF_TOKEN")
         if not resolved_key:
             raise ConfigError(
                 "--api-key or HF_TOKEN env var required for huggingface provider"
             )
+        context_length = max_context_tokens
+        if context_length is None:
+            context_length = _litellm_context_length(f"huggingface/{bare_model}")
 
     elif provider == "openrouter":
         if not model:
             raise ConfigError("--model is required when --provider is openrouter")
         api_base = base_url
         model_id = model
-        context_length = max_context_tokens
         resolved_key = api_key or os.environ.get("OPENROUTER_API_KEY")
         if not resolved_key:
             raise ConfigError(
                 "--api-key or OPENROUTER_API_KEY env var required for openrouter provider"
             )
+        context_length = max_context_tokens
+        if context_length is None:
+            _bare = model_id.removeprefix("openrouter/")
+            context_length = _litellm_context_length(f"openrouter/{_bare}")
     elif provider == "llamacpp":
         api_base = _normalize_openai_base(base_url or "http://127.0.0.1:8080")
         if model:
@@ -6358,6 +6443,10 @@ def resolve_provider(
                     "Check that llama-server is running or use --model to specify one."
                 )
         context_length = max_context_tokens
+        if context_length is None:
+            context_length = discover_llamacpp_context_length(
+                api_base.removesuffix("/v1"), verbose
+            ) or discover_generic_context_length(api_base, model_id, verbose)
         resolved_key = None
 
     elif provider == "generic":
@@ -6370,6 +6459,10 @@ def resolve_provider(
         api_base = _normalize_openai_base(base_url)
         model_id = model
         context_length = max_context_tokens
+        if context_length is None:
+            context_length = discover_generic_context_length(
+                api_base, model_id, verbose
+            )
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
 
     elif provider == _GOOGLE_PROVIDER:
