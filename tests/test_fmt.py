@@ -743,3 +743,90 @@ class TestToolFetch:
         body = "x" * 10000
         out = _capture_styled(fmt.tool_fetch, self._result(body=body))
         assert "truncated at" in out
+
+
+def _visual_rows(text: str, width: int) -> list[str]:
+    rows: list[str] = []
+    for line in text.split("\n"):
+        rows.extend(fmt._wrap_to_rows(line, width))
+    return rows
+
+
+class TestTailToViewport:
+    def test_keeps_newest_rows(self):
+        text = "\n".join(f"line{i}" for i in range(100))
+        out = fmt._tail_to_viewport(text, width=80, height=5).plain
+        lines = out.split("\n")
+        assert len(lines) == 5
+        assert lines == [f"line{i}" for i in range(95, 100)]
+        assert "line0" not in lines
+
+    def test_long_line_consumes_multiple_rows(self):
+        # A long final line should push earlier short lines off sooner than
+        # short lines would.
+        long_tail = "z" * 200
+        text = "a\nb\nc\nd\n" + long_tail
+        out = fmt._tail_to_viewport(text, width=20, height=4).plain
+        rows = out.split("\n")
+        assert len(rows) == 4
+        # All four kept rows belong to the wrapped long line; the short lines
+        # were pushed out because the long line alone fills the budget.
+        assert "a" not in rows and "b" not in rows
+        assert all(set(r) <= {"z"} for r in rows)
+
+    def test_single_over_long_line_trimmed_to_tail(self):
+        # One source line wrapping past the viewport must return exactly height
+        # rows showing its tail, never overflow.
+        line = "".join(str(i % 10) for i in range(500))
+        height = 4
+        width = 20
+        out = fmt._tail_to_viewport(line, width=width, height=height)
+        rows = out.plain.split("\n")
+        assert len(rows) == height
+        assert all(len(r) <= width for r in rows)
+        # The kept rows are the final visual rows of the wrapped line.
+        expected = _visual_rows(line, width)[-height:]
+        assert rows == expected
+        assert out.plain.endswith(line[-1])
+
+    def test_empty_line_is_one_row(self):
+        assert fmt._wrap_to_rows("", 10) == [""]
+
+
+class TestStreamRaw:
+    def test_non_tty_yields_noop(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        try:
+            with fmt.stream_raw() as update:
+                assert update is fmt._noop
+                update("anything")
+            assert buf.getvalue() == ""
+        finally:
+            fmt._console = old
+
+    def test_renders_then_cleans_up(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(
+            file=buf,
+            force_terminal=True,
+            color_system="truecolor",
+            no_color=False,
+            width=40,
+            height=10,
+            _environ={"TERM": "xterm-256color"},
+        )
+        try:
+            with fmt.stream_raw() as update:
+                assert update is not fmt._noop
+                update("hello world")
+                update("hello world\nsecond line")
+            out = buf.getvalue()
+        finally:
+            fmt._console = old
+        assert "second line" in out
+        # A transient Live wipes its rendered region on exit, which emits an
+        # erase-in-line control sequence.
+        assert "\x1b[2K" in out

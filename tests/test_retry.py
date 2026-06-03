@@ -748,3 +748,72 @@ class TestCallLlmRetry:
 
         with pytest.raises(ValueError, match="retries must be >= 1"):
             Session(retries=0)
+
+
+def _delta_chunk(text):
+    delta = types.SimpleNamespace(content=text, reasoning_content=None, tool_calls=None)
+    choice = types.SimpleNamespace(delta=delta)
+    return types.SimpleNamespace(choices=[choice])
+
+
+class TestCompletionViaStream:
+    def test_stream_entered_only_after_handoff(self, monkeypatch):
+        """The live stream display opens only once accumulated text crosses the
+        handoff threshold, and on_stream_start fires exactly once right before
+        the first update."""
+        import contextlib
+        from io import StringIO
+
+        from rich.console import Console
+
+        from swival import agent, fmt
+
+        old_console = fmt._console
+        fmt._console = Console(file=StringIO(), width=40, height=10)
+        threshold = max(fmt._console.width, 40)
+
+        events = []
+
+        @contextlib.contextmanager
+        def fake_stream_raw():
+            events.append(("enter", None))
+            yield lambda text: events.append(("update", len(text)))
+
+        monkeypatch.setattr(fmt, "stream_raw", fake_stream_raw)
+
+        # Three deltas below the threshold individually, crossing it cumulatively
+        # on the third.
+        step = threshold // 2
+        chunks = [_delta_chunk("x" * step) for _ in range(3)]
+
+        def fake_completion(**kwargs):
+            assert kwargs.get("stream") is True
+            return iter(chunks)
+
+        starts = []
+        try:
+            with (
+                patch("litellm.completion", fake_completion),
+                patch(
+                    "litellm.stream_chunk_builder",
+                    lambda chunks, messages=None: "rebuilt",
+                ),
+            ):
+                result = agent._completion_via_stream(
+                    {"model": "x", "messages": []},
+                    on_stream_start=lambda: starts.append(True),
+                )
+        finally:
+            fmt._console = old_console
+
+        assert result == "rebuilt"
+        assert len(starts) == 1
+        kinds = [k for k, _ in events]
+        assert kinds.count("enter") == 1
+        # Order: enter the live context, then the first update.
+        assert kinds[0] == "enter"
+        assert kinds[1] == "update"
+        # Nothing was drawn before the threshold was crossed: the first update
+        # already holds at least a threshold's worth of text.
+        first_update_len = next(n for k, n in events if k == "update")
+        assert first_update_len >= threshold

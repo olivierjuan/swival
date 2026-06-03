@@ -123,8 +123,10 @@ warnings.filterwarnings(
 
 class _FallbackEncoder:
     """Rudimentary fallback when tiktoken can't load cl100k_base offline."""
+
     def encode(self, text: str, **kwargs) -> list[int]:
         return list(text.encode("utf-8"))
+
 
 DEFAULT_SYSTEM_PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 MAX_ARG_LOG = 1000
@@ -3989,11 +3991,12 @@ def _completion_via_stream(completion_kwargs, on_stream_start=None):
 
     stream_kwargs = {**completion_kwargs, "stream": True}
     chunks = []
-    # The marquee only displays the tail, so we keep a bounded sliding window
-    # instead of accumulating the whole response (avoids O(n^2) string growth
-    # over thousands of chunks).
+    # The raw display only shows the last viewport's worth of rows, so we keep a
+    # bounded sliding window instead of accumulating the whole response (avoids
+    # O(n^2) string growth over thousands of chunks). Roughly two screens is
+    # invisible to the user yet ample for the trim in stream_raw.
     tail = ""
-    tail_cap = 4096
+    tail_cap = max(fmt._console.width * fmt._console.height * 2, 8192)
     # Hold off on dismissing the caller's waiting display until we have enough
     # streamed text to fill the line — otherwise the brief, narrow stream
     # display would prematurely cut off the wider prompt-marquee animation.
@@ -4014,7 +4017,7 @@ def _completion_via_stream(completion_kwargs, on_stream_start=None):
                         on_stream_start()
                     except Exception:
                         pass
-                update = stack.enter_context(fmt.stream_marquee())
+                update = stack.enter_context(fmt.stream_raw())
             update(tail)
 
         response_stream = litellm.completion(**stream_kwargs)

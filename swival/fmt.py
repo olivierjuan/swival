@@ -336,37 +336,72 @@ def input_marquee_then_spinner(text: str, spinner_label: str, delay: float = 4.0
             spinner_cm["cm"].__exit__(None, None, None)
 
 
-@contextlib.contextmanager
-def stream_marquee():
-    """Context manager that displays streamed LLM output as a marquee on stderr.
+def _wrap_to_rows(line: str, width: int) -> list[str]:
+    """Split a single source line into the visual rows it occupies at *width*,
+    measured in display cells. An empty line is one (empty) row."""
+    from rich.cells import cell_len
 
-    Yields an ``update(text)`` callable. Each call replaces the displayed line
-    with the tail of *text* that fits in the terminal width. The line is
-    cleared on exit so subsequent output starts at column 0.
+    if not line:
+        return [""]
+    rows: list[str] = []
+    cur: list[str] = []
+    cur_w = 0
+    for ch in line:
+        w = cell_len(ch)
+        if cur and cur_w + w > width:
+            rows.append("".join(cur))
+            cur, cur_w = [ch], w
+        else:
+            cur.append(ch)
+            cur_w += w
+    rows.append("".join(cur))
+    return rows
+
+
+def _tail_to_viewport(text: str, width: int, height: int) -> Text:
+    """Return the last *height* visual rows of *text*, wrapped at *width*.
+
+    Tails by visual rows rather than source lines, so a single paragraph that
+    wraps to more than *height* rows is trimmed to its final rows instead of
+    overflowing. This keeps the newest streamed output on screen; Rich's own
+    overflow handling would crop from the top instead.
     """
-    import sys
+    width = max(width, 1)
+    rows: list[str] = []
+    for line in text.split("\n"):
+        rows.extend(_wrap_to_rows(line, width))
+    tail = rows[-max(height, 1) :]
+    return Text("\n".join(tail), style="dim")
 
+
+@contextlib.contextmanager
+def stream_raw():
+    """Context manager that displays streamed LLM output as plain text on stderr.
+
+    Yields an ``update(text)`` callable that redraws the tail of the accumulated
+    text as it arrives. The text is shown unformatted; the live region is
+    transient, so it is wiped on exit and the caller can re-print the finished
+    response with formatting.
+    """
     if not _console.is_terminal:
         yield _noop
         return
 
-    from rich.cells import cell_len
+    with Live(
+        console=_console,
+        transient=True,
+        auto_refresh=False,
+        vertical_overflow="crop",
+    ) as live:
 
-    def update(text: str) -> None:
-        width = max(_console.width - 6, 20)
-        raw_tail = text[-(width * 2) :] if len(text) > width * 2 else text
-        sanitized = "".join(ch if ch.isprintable() else " " for ch in raw_tail)
-        flat = " ".join(sanitized.split())
-        while cell_len(flat) > width and flat:
-            flat = flat[1:]
-        sys.stderr.write(f"\r\x1b[2K  \x1b[36m> {flat}\x1b[0m")
-        sys.stderr.flush()
+        def update(text: str) -> None:
+            height = max(_console.height - 2, 1)
+            live.update(
+                _tail_to_viewport(text, max(_console.width, 1), height),
+                refresh=True,
+            )
 
-    try:
         yield update
-    finally:
-        sys.stderr.write("\r\x1b[2K")
-        sys.stderr.flush()
 
 
 def completion(turns: int, exit_code: str) -> None:
