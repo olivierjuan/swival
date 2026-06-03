@@ -1,5 +1,6 @@
 """Tests for the library API: Session, Result, swival.run()."""
 
+import importlib.metadata
 import types
 
 import pytest
@@ -29,6 +30,10 @@ def _exhausting_llm(*args, **kwargs):
         function=types.SimpleNamespace(name="read_file", arguments='{"path": "x.txt"}'),
     )
     return _make_message(content=None, tool_calls=[tc]), "stop"
+
+
+def test_package_exposes_version():
+    assert swival.__version__ == importlib.metadata.version("swival")
 
 
 class TestResult:
