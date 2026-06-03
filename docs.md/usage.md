@@ -194,6 +194,39 @@ swival --extra-body '{"chat_template_kwargs": {"enable_thinking": false}}' "task
 swival --provider chatgpt --model gpt-5.5 --reasoning-effort high "task"
 ```
 
+### Service Tiers
+
+**Priority processing** gives significantly lower and more consistent latency compared to standard processing, while keeping the same model quality and reasoning effort. It costs more (about 2× standard per-token pricing). Use it for interactive, latency-sensitive workflows where you want faster responses without sacrificing output quality.
+
+**Flex processing** is the opposite — cheaper but with variable latency, as requests may be deferred when capacity is low. Use it for batch jobs, evals, or other asynchronous workloads.
+
+Service tier is not exposed as a dedicated CLI flag. Pass it via `--extra-body`:
+
+```sh
+# Priority ("fast" mode — like Codex's fast setting)
+swival --provider chatgpt --model gpt-5.5 \
+    --extra-body '{"service_tier": "priority"}' "task"
+```
+
+In config:
+
+```toml
+[chatgpt]
+model = "gpt-5.5"
+extra_body = { service_tier = "priority" }
+```
+
+`reasoning_effort` and `service_tier` are independent knobs — you can combine them to tune both how deeply the model thinks and how fast the response arrives:
+
+```sh
+# Fast response + moderate reasoning
+swival --provider chatgpt --model gpt-5.5 \
+    --reasoning-effort medium \
+    --extra-body '{"service_tier": "priority"}' "task"
+```
+
+Not all models support service tiers. Check the [OpenAI pricing page](https://platform.openai.com/api/pricing) for the current list of supported models. The available tier values are `"default"` (standard), `"priority"`, and `"flex"`.
+
 `--proactive-summaries` enables periodic checkpoint summarization of the conversation. Every ten turns, recent turns are summarized and stored internally. These summaries survive context compaction and give the model a condensed record of earlier work that would otherwise be lost.
 
 Useful for long-running sessions.

@@ -305,6 +305,7 @@ swival --logout
 <p>Models like <code>gpt-5.5</code> support tunable reasoning effort. Use <code>--reasoning-effort</code> to control how much the model thinks before responding:</p>
 <pre><code class="language-sh">swival --provider chatgpt --model gpt-5.5 --reasoning-effort high &quot;task&quot;
 </code></pre>
+<p>You can also combine reasoning effort with <strong>priority processing</strong> (<code>service_tier: "priority"</code>) for faster responses without sacrificing quality. See the <a href="usage.html#service-tiers">Service Tiers</a> section.</p>
 <p>No other configuration is needed.</p>
 <h2 id="aws-bedrock">AWS Bedrock</h2>
 <p>The <code>bedrock</code> provider connects to AWS Bedrock. It uses your existing AWS credentials — <code>--api-key</code> is not supported.</p>

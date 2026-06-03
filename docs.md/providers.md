@@ -327,6 +327,8 @@ Models like `gpt-5.5` support tunable reasoning effort. Use `--reasoning-effort`
 swival --provider chatgpt --model gpt-5.5 --reasoning-effort high "task"
 ```
 
+You can also combine reasoning effort with **priority processing** (`service_tier: "priority"`) for faster responses without sacrificing quality. See the [Service Tiers](usage.md#service-tiers) section.
+
 No other configuration is needed.
 
 ## AWS Bedrock

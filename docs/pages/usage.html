@@ -199,6 +199,26 @@ swival --oneshot-commands '/loop 30 sec check git status and report unusual acti
 <p><code>--reasoning-effort LEVEL</code> sets the reasoning effort for models that support tunable reasoning (e.g. gpt-5.5). Valid levels are <code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, and <code>default</code>.</p>
 <pre><code class="language-sh">swival --provider chatgpt --model gpt-5.5 --reasoning-effort high &quot;task&quot;
 </code></pre>
+<h3 id="service-tiers">Service Tiers</h3>
+<p><strong>Priority processing</strong> gives significantly lower and more consistent latency compared to standard processing, while keeping the same model quality and reasoning effort. It costs more (about 2× standard per-token pricing). Use it for interactive, latency-sensitive workflows where you want faster responses without sacrificing output quality.</p>
+<p><strong>Flex processing</strong> is the opposite — cheaper but with variable latency, as requests may be deferred when capacity is low. Use it for batch jobs, evals, or other asynchronous workloads.</p>
+<p>Service tier is not exposed as a dedicated CLI flag. Pass it via <code>--extra-body</code>:</p>
+<pre><code class="language-sh"># Priority (&quot;fast&quot; mode — like Codex's fast setting)
+swival --provider chatgpt --model gpt-5.5 \
+    --extra-body '{&quot;service_tier&quot;: &quot;priority&quot;}' &quot;task&quot;
+</code></pre>
+<p>In config:</p>
+<pre><code class="language-toml">[chatgpt]
+model = &quot;gpt-5.5&quot;
+extra_body = { service_tier = &quot;priority&quot; }
+</code></pre>
+<p><code>reasoning_effort</code> and <code>service_tier</code> are independent knobs — you can combine them to tune both how deeply the model thinks and how fast the response arrives:</p>
+<pre><code class="language-sh"># Fast response + moderate reasoning
+swival --provider chatgpt --model gpt-5.5 \
+    --reasoning-effort medium \
+    --extra-body '{&quot;service_tier&quot;: &quot;priority&quot;}' &quot;task&quot;
+</code></pre>
+<p>Not all models support service tiers. Check the <a href="https://platform.openai.com/api/pricing">OpenAI pricing page</a> for the current list of supported models. The available tier values are <code>"default"</code> (standard), <code>"priority"</code>, and <code>"flex"</code>.</p>
 <p><code>--proactive-summaries</code> enables periodic checkpoint summarization of the conversation. Every ten turns, recent turns are summarized and stored internally. These summaries survive context compaction and give the model a condensed record of earlier work that would otherwise be lost.</p>
 <p>Useful for long-running sessions.</p>
 <h3 id="sandboxing-flags">Sandboxing Flags</h3>
