@@ -142,15 +142,15 @@ class TestDeterministicRender:
             entry = state.artifact_state[_artifact_key(vf)]
             report = entry["report_filename"]
             patch = entry["patch_filename"]
-            assert f"[{report}]({report})" in text
-            assert f"[{patch}]({patch})" in text
+            # The number links to the report; a dedicated cell links the patch.
+            assert f"]({report})" in text
+            assert f"[patch]({patch})" in text
 
-    def test_severity_grouping_orders_critical_before_high(self, tmp_path):
+    def test_summary_line_orders_critical_before_high(self, tmp_path):
         state = _make_two_finding_state(tmp_path)
         text = _render_findings_readme(state)
-        i_crit = text.index("### critical")
-        i_high = text.index("### high")
-        assert i_crit < i_high
+        assert "**Total findings: 2**" in text
+        assert text.index("Critical: 1") < text.index("High: 1")
 
     def test_failed_section_absent_when_all_written(self, tmp_path):
         state = _make_two_finding_state(tmp_path)
@@ -196,7 +196,9 @@ class TestTableEscaping:
         # per GFM and must not introduce a new column.
         cells = re.split(r"(?<!\\)\|", row)
         assert cells[0] == "" and cells[-1] == ""
-        assert len(cells) == 10, row
+        # 5 content columns (# | Finding | Severity | File | Patch) plus the
+        # two empty edges that bracket a GFM row.
+        assert len(cells) == 7, row
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +562,7 @@ class TestAtomicWrite:
         assert result is True
         body = canary.read_text(encoding="utf-8")
         assert "CANARY CONTENTS" not in body
-        assert "# Security audit" in body
+        assert "Audit Findings" in body
         assert not (artifact_dir / "README.tmp").exists()
 
 
@@ -607,7 +609,8 @@ class TestRepoBasenameInTitle:
         state = _make_two_finding_state(tmp_path)
         text = _render_findings_readme(state, repo_name="my-cool-repo")
         first_line = text.splitlines()[0]
-        assert first_line.startswith("# Security audit — my-cool-repo @ deadbeefcafe")
+        assert first_line == "# my-cool-repo Audit Findings"
+        assert "at commit `deadbeefcafe`" in text
 
     def test_write_helper_passes_base_dir_basename(self, tmp_path):
         state = _make_two_finding_state(tmp_path)
@@ -617,7 +620,7 @@ class TestRepoBasenameInTitle:
         body = readme.read_text(encoding="utf-8")
         expected_repo = tmp_path.resolve().name
         first_line = body.splitlines()[0]
-        assert first_line.startswith(f"# Security audit — {expected_repo} @ ")
+        assert first_line == f"# {expected_repo} Audit Findings"
 
 
 # ---------------------------------------------------------------------------
@@ -692,9 +695,9 @@ class TestRegenStaleLinks:
         text = _render_findings_readme(state)
         report2 = state.artifact_state[_artifact_key(vf2)]["report_filename"]
         patch2 = state.artifact_state[_artifact_key(vf2)]["patch_filename"]
-        assert f"[{report2}]({report2})" not in text
-        assert f"[{patch2}]({patch2})" not in text
-        assert report2 in text
+        # A pending finding must not advertise a link to an artifact that may be
+        # mid-regeneration: the number stays plain and the patch is plain text.
+        assert f"]({report2})" not in text
+        assert f"[patch]({patch2})" not in text
         assert patch2 in text
-        row_marker = f"| {idx2} | pending |"
-        assert row_marker in text
+        assert f"| {idx2:03d} |" in text

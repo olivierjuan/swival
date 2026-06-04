@@ -4154,6 +4154,43 @@ def _severity_sort_key(severity: str) -> tuple[int, str]:
     return (_SEVERITY_RANK.get(sev, len(_SEVERITY_RANK)), sev)
 
 
+_SEVERITY_LABEL = {
+    "critical": "Critical",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "info": "Info",
+}
+
+
+def _severity_label(severity: str) -> str:
+    sev = (severity or "").lower()
+    return _SEVERITY_LABEL.get(sev, (severity or "Unknown").capitalize())
+
+
+_FINDING_TYPE_ACRONYMS = {
+    "dos": "DoS",
+    "ssrf": "SSRF",
+    "rce": "RCE",
+    "xss": "XSS",
+    "csrf": "CSRF",
+    "sql": "SQL",
+    "tls": "TLS",
+    "api": "API",
+    "uaf": "use-after-free",
+}
+
+
+def _humanize_finding_type(finding_type: str) -> str:
+    """Turn a ``finding_type`` token into a sentence-case section header."""
+    cleaned = (finding_type or "").replace("_", " ").replace("-", " ").strip()
+    if not cleaned:
+        return "Uncategorized"
+    words = [_FINDING_TYPE_ACRONYMS.get(w, w) for w in cleaned.split()]
+    header = " ".join(words)
+    return header[:1].upper() + header[1:]
+
+
 def _render_findings_readme(state: AuditRunState, *, repo_name: str = "audit") -> str:
     """Render the audit-findings README as deterministic Markdown.
 
@@ -4166,11 +4203,125 @@ def _render_findings_readme(state: AuditRunState, *, repo_name: str = "audit") -
     short_commit = (state.scope.commit or "")[:12] or "unknown"
     title_hook = repo_name or "audit"
 
+    indexed: list[tuple[int, VerifiedFinding, dict]] = []
+    for vf in state.verified_findings:
+        entry = state.artifact_state[_artifact_key(vf)]
+        indexed.append((int(entry["index"]), vf, entry))
+    indexed.sort(key=lambda t: t[0])
+
     lines: list[str] = []
-    lines.append(f"# Security audit — {title_hook} @ {short_commit}")
+    lines.append(f"# {title_hook} Audit Findings")
+    lines.append("")
+    lines.append(
+        f"Security audit of `{repo_name}` at commit `{short_commit}`. "
+        "Each finding links to a detailed write-up (`NNN-*.md`) and a "
+        "proposed patch (`NNN-*.patch`)."
+    )
     lines.append("")
 
-    lines.append("## Run")
+    lines.append("## Summary")
+    lines.append("")
+    sev_counts: dict[str, int] = {}
+    for _, vf, _entry in indexed:
+        sev = (vf.finding.severity or "").lower()
+        sev_counts[sev] = sev_counts.get(sev, 0) + 1
+    ordered = sorted(sev_counts.items(), key=lambda kv: _severity_sort_key(kv[0]))
+    breakdown = ", ".join(f"{_severity_label(sev)}: {n}" for sev, n in ordered)
+    total = len(indexed)
+    if breakdown:
+        lines.append(f"**Total findings: {total}** ({breakdown})")
+    else:
+        lines.append(f"**Total findings: {total}**")
+    lines.append("")
+
+    lines.append("## Findings")
+    lines.append("")
+    groups: dict[str, list[tuple[int, VerifiedFinding, dict]]] = {}
+    for idx, vf, entry in indexed:
+        ftype = (vf.finding.finding_type or "").strip().lower() or "uncategorized"
+        groups.setdefault(ftype, []).append((idx, vf, entry))
+
+    def _group_sort_key(ftype: str) -> tuple[int, str]:
+        best = min(
+            _SEVERITY_RANK.get((vf.finding.severity or "").lower(), len(_SEVERITY_RANK))
+            for _, vf, _e in groups[ftype]
+        )
+        return (best, ftype)
+
+    for ftype in sorted(groups, key=_group_sort_key):
+        rows = sorted(groups[ftype], key=lambda t: t[0])
+        lines.append(f"### {_humanize_finding_type(ftype)} ({len(rows)})")
+        lines.append("")
+        lines.append("| # | Finding | Severity | File | Patch |")
+        lines.append("|---|---|---|---|---|")
+        for idx, vf, entry in rows:
+            status = str(entry.get("status", "pending"))
+            report_filename = str(entry.get("report_filename", ""))
+            patch_filename = str(entry.get("patch_filename", ""))
+            if status == "written":
+                num_cell = f"[{idx:03d}]({report_filename})"
+                patch_cell = f"[patch]({patch_filename})"
+            else:
+                num_cell = f"{idx:03d}"
+                patch_cell = _escape_cell(patch_filename)
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        num_cell,
+                        _escape_cell(vf.finding.title),
+                        _severity_label(vf.finding.severity),
+                        f"`{_escape_cell(vf.finding.source_file)}`",
+                        patch_cell,
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+
+    if state.adjudication_discarded:
+        lines.append("## Dropped in adjudication")
+        lines.append("")
+        lines.append(
+            "These findings reproduced in Phase 4 but the Phase 4.5 gate judged "
+            "them false positives or out of a realistic threat model."
+        )
+        lines.append("")
+        for entry in state.adjudication_discarded:
+            title = _escape_cell(entry.get("title", "untitled"))
+            sev = _escape_cell(entry.get("severity", ""))
+            src = _escape_cell(entry.get("source_file", ""))
+            reason = _escape_cell(entry.get("reason", ""))
+            lines.append(f"- **{title}** ({sev}, {src}): {reason}")
+        lines.append("")
+
+    failed_entries = [
+        (idx, vf, entry)
+        for idx, vf, entry in indexed
+        if entry.get("status") in ("failed", "pending")
+    ]
+    if failed_entries:
+        lines.append("## Failed or pending artifacts")
+        lines.append("")
+        for idx, vf, entry in failed_entries:
+            status = str(entry.get("status", "pending"))
+            err_code = entry.get("last_error_code") or "n/a"
+            err_msg = entry.get("last_error") or "n/a"
+            title = _escape_cell(vf.finding.title)
+            lines.append(f"- **{idx:03d}** ({status}): {title}")
+            lines.append(f"  - error code: `{err_code}`")
+            lines.append(f"  - error: {err_msg}")
+            lines.append(
+                f"  - retry: `/audit --regen --finding {idx} --patch-max-turns 75`"
+            )
+        lines.append("")
+        lines.append(
+            "Run `/audit --resume --patch-max-turns 75` to retry all incomplete "
+            "artifacts at once."
+        )
+        lines.append("")
+
+    lines.append("## Run details")
     lines.append("")
     lines.append(f"- run id: `{state.run_id}`")
     lines.append(f"- commit: `{state.scope.commit}`")
@@ -4181,74 +4332,7 @@ def _render_findings_readme(state: AuditRunState, *, repo_name: str = "audit") -
         lines.append(f"- scope: {scope_files} file(s), focus: {focus_str}")
     else:
         lines.append(f"- scope: {scope_files} file(s)")
-    lines.append("")
-
-    indexed: list[tuple[int, VerifiedFinding, dict]] = []
-    for vf in state.verified_findings:
-        entry = state.artifact_state[_artifact_key(vf)]
-        indexed.append((int(entry["index"]), vf, entry))
-    indexed.sort(key=lambda t: t[0])
-
-    lines.append("## Findings")
-    lines.append("")
-    lines.append("| # | status | severity | type | title | file | report | patch |")
-    lines.append("|---|---|---|---|---|---|---|---|")
-    for idx, vf, entry in indexed:
-        status = str(entry.get("status", "pending"))
-        report_filename = str(entry.get("report_filename", ""))
-        patch_filename = str(entry.get("patch_filename", ""))
-        if status == "written":
-            report_cell = f"[{report_filename}]({report_filename})"
-            patch_cell = f"[{patch_filename}]({patch_filename})"
-        else:
-            report_cell = report_filename
-            patch_cell = patch_filename
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    str(idx),
-                    _escape_cell(status),
-                    _escape_cell(vf.finding.severity),
-                    _escape_cell(vf.finding.finding_type),
-                    _escape_cell(vf.finding.title),
-                    _escape_cell(vf.finding.source_file),
-                    report_cell,
-                    patch_cell,
-                ]
-            )
-            + " |"
-        )
-    lines.append("")
-
-    lines.append("## Findings by severity")
-    lines.append("")
-    by_sev: dict[str, list[tuple[int, VerifiedFinding, dict]]] = {}
-    for idx, vf, entry in indexed:
-        by_sev.setdefault((vf.finding.severity or "").lower(), []).append(
-            (idx, vf, entry)
-        )
-    sorted_sevs = sorted(by_sev.keys(), key=_severity_sort_key)
-    for sev in sorted_sevs:
-        rows = by_sev[sev]
-        label = sev or "unknown"
-        lines.append(f"### {label} ({len(rows)})")
-        lines.append("")
-        for idx, vf, entry in rows:
-            status = str(entry.get("status", "pending"))
-            report_filename = str(entry.get("report_filename", ""))
-            if status == "written":
-                report_ref = f"[{report_filename}]({report_filename})"
-            else:
-                report_ref = report_filename
-            source = _escape_cell(vf.finding.source_file)
-            title = _escape_cell(vf.finding.title)
-            lines.append(f"- **{idx:03d}** — {title} ({source}) — {report_ref}")
-        lines.append("")
-
     totals = _audit_totals(state)
-    lines.append("## Totals")
-    lines.append("")
     lines.append(f"- files triaged: {totals['files_triaged']}")
     lines.append(f"- files escalated: {totals['files_escalated']}")
     lines.append(f"- files deep-reviewed: {totals['files_deep_reviewed']}")
@@ -4265,48 +4349,6 @@ def _render_findings_readme(state: AuditRunState, *, repo_name: str = "audit") -
         f"{totals['artifacts_pending']} pending"
     )
     lines.append("")
-
-    if state.adjudication_discarded:
-        lines.append("## Dropped in adjudication")
-        lines.append("")
-        lines.append(
-            "These findings reproduced in Phase 4 but the Phase 4.5 gate judged "
-            "them false positives or out of a realistic threat model."
-        )
-        lines.append("")
-        for entry in state.adjudication_discarded:
-            title = _escape_cell(entry.get("title", "untitled"))
-            sev = _escape_cell(entry.get("severity", ""))
-            src = _escape_cell(entry.get("source_file", ""))
-            reason = _escape_cell(entry.get("reason", ""))
-            lines.append(f"- **{title}** ({sev}, {src}) — {reason}")
-        lines.append("")
-
-    failed_entries = [
-        (idx, vf, entry)
-        for idx, vf, entry in indexed
-        if entry.get("status") in ("failed", "pending")
-    ]
-    if failed_entries:
-        lines.append("## Failed or pending artifacts")
-        lines.append("")
-        for idx, vf, entry in failed_entries:
-            status = str(entry.get("status", "pending"))
-            err_code = entry.get("last_error_code") or "—"
-            err_msg = entry.get("last_error") or "—"
-            title = _escape_cell(vf.finding.title)
-            lines.append(f"- **{idx:03d}** ({status}) — {title}")
-            lines.append(f"  - error code: `{err_code}`")
-            lines.append(f"  - error: {err_msg}")
-            lines.append(
-                f"  - retry: `/audit --regen --finding {idx} --patch-max-turns 75`"
-            )
-        lines.append("")
-        lines.append(
-            "Run `/audit --resume --patch-max-turns 75` to retry all incomplete "
-            "artifacts at once."
-        )
-        lines.append("")
 
     lines.append("## How to read this directory")
     lines.append("")
