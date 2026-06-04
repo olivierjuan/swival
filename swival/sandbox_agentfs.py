@@ -282,8 +282,7 @@ def maybe_reexec(
     # exec target is another swival process, which needs its bundled
     # bin/ to be reachable on entry. The invariant that protects user
     # tools is that every *user-facing* spawn inside the re-exec'd
-    # swival goes through swival._env.child_env(). See
-    # PLAN-subprocess-path-leak.md.
+    # swival goes through swival._env.child_env().
     env = os.environ.copy()
     env[_ENV_MARKER] = "1"
     env[_VERSION_ENV] = probe["version"]
