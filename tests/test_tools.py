@@ -1039,6 +1039,69 @@ class TestDirectoryListingCap:
         assert len(lines_before.encode("utf-8")) <= MAX_OUTPUT_BYTES
 
 
+class TestCaptureProcessSanitizes:
+    """Regression: _capture_process collapses terminal control sequences."""
+
+    class _FakeProc:
+        def __init__(self, data: bytes, returncode: int = 0):
+            import io
+
+            self.stdout = io.BytesIO(data)
+            self.returncode = returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            pass
+
+    def test_progress_bar_collapses_past_1mb_keeps_final_frame(self, tmp_path):
+        """The key regression: a multi-megabyte progress stream collapses to its
+        final frame, proving the sink sees the tail rather than a discarded head.
+        """
+        from swival.tools import _capture_process
+
+        frames = b"".join(b"frame %d\r" % i for i in range(200_000))
+        data = frames + b"frame DONE\x1b[K\n"
+        assert len(data) > 1_024 * 1_024  # well past the legacy 1 MB retention
+
+        proc = self._FakeProc(data)
+        result = _capture_process(proc, 30, str(tmp_path))
+
+        assert result == "frame DONE"
+        assert "frame 0" not in result
+        assert "[output truncated" not in result  # one repainted line never scrolls
+
+    def test_plain_output_passes_through(self, tmp_path):
+        from swival.tools import _capture_process
+
+        proc = self._FakeProc(b"line one\nline two\nline three\n")
+        result = _capture_process(proc, 30, str(tmp_path))
+        assert result == "line one\nline two\nline three\n"
+
+    def test_sgr_color_stripped_from_capture(self, tmp_path):
+        from swival.tools import _capture_process
+
+        proc = self._FakeProc(b"\x1b[1;31mboom\x1b[0m\n")
+        result = _capture_process(proc, 30, str(tmp_path))
+        assert result == "boom"
+
+    def test_failed_command_emits_exit_code_then_sanitized_output(self, tmp_path):
+        from swival.tools import _capture_process
+
+        proc = self._FakeProc(b"working\rdone\x1b[K\n", returncode=2)
+        result = _capture_process(proc, 30, str(tmp_path))
+        assert result == "Exit code: 2\ndone"
+
+    def test_run_shell_command_end_to_end_collapses_bar(self, tmp_path):
+        from swival.tools import _run_shell_command
+
+        # printf is available under /bin/sh; redraw one line then finish.
+        cmd = r"printf '10%%\r50%%\r100%%\n'"
+        result = _run_shell_command(cmd, str(tmp_path), 30)
+        assert result == "100%"
+
+
 class TestAgentLoop:
     """Tests for agent loop behavior (mocked LLM)."""
 

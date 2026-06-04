@@ -17,6 +17,7 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Literal
 
 from .a2a_types import A2A_META_PREFIX
+from .terminal import TerminalSink
 
 TOOLS = [
     {
@@ -2683,24 +2684,15 @@ def _capture_process(
     proc: subprocess.Popen, timeout: int, base_dir: str, scratch_dir: str | None = None
 ) -> str:
     """Capture output from a running subprocess with timeout enforcement."""
-    output_chunks: list[bytes] = []
-    output_total = 0
-    output_truncated = False
+    sink = TerminalSink()
 
     def _reader():
-        nonlocal output_total, output_truncated
         try:
             while True:
                 chunk = proc.stdout.read(4096)
                 if not chunk:
                     break
-                if output_truncated:
-                    continue  # keep draining to prevent pipe backpressure
-                remaining = MAX_FILE_OUTPUT - output_total
-                output_chunks.append(chunk[:remaining])
-                output_total += len(output_chunks[-1])
-                if output_total >= MAX_FILE_OUTPUT:
-                    output_truncated = True
+                sink.feed(chunk)
         except (OSError, ValueError):
             pass  # pipe closed/broken after kill
 
@@ -2723,8 +2715,11 @@ def _capture_process(
         reader_thread.join(timeout=2)
     proc.stdout.close()
 
-    # Build result
-    raw_output = b"".join(output_chunks).decode("utf-8", errors="replace")
+    # The sink has already collapsed terminal control sequences (progress bars,
+    # spinners, cursor repaints) while draining the pipe, so the final frame
+    # survives even when the program wrote far more than the retained cap.
+    raw_output = sink.finalize()
+    output_truncated = sink.output_truncated
     parts: list[str] = []
 
     if timed_out:
@@ -2736,6 +2731,8 @@ def _capture_process(
         parts.append(raw_output)
 
     if output_truncated:
+        # Fires on retained sanitized output, not raw byte volume: a program
+        # that repaints one screen forever leaves this false.
         parts.append("[output truncated at 1MB]")
 
     result = "\n".join(parts) if parts else "(no output)"

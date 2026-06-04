@@ -68,6 +68,7 @@ from .goal import (
 from .thinking import ThinkingState
 from .todo import TodoState
 from .tracker import FileAccessTracker
+from .terminal import sanitize_terminal_output
 from .a2a_client import A2aShutdownError
 from .a2a_types import (
     EVENT_STATUS_UPDATE,
@@ -10514,7 +10515,7 @@ def _run_quick_shell(cmd: str, cwd: str) -> tuple[int, str]:
             timeout=30,
             cwd=cwd,
         )
-        output = (proc.stdout + proc.stderr).rstrip()
+        output = sanitize_terminal_output(proc.stdout + proc.stderr).rstrip()
         return proc.returncode, output
     except subprocess.TimeoutExpired:
         return 1, "(timed out after 30s)"

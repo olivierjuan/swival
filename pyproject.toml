@@ -75,6 +75,7 @@ override-dependencies = ["aiohttp>=3.13.5", "python-dotenv>=1.2.2"]
 dev = [
     "pytest>=9.0.3",
     "ruff>=0.15.15",
+    "httpx2>=2.3.0",
 ]
 website = [
     "markdown",
