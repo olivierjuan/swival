@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from ._env import child_env
+
 if TYPE_CHECKING:
     from .tools import NormalizedCommandCall
 
@@ -59,6 +61,7 @@ def run_command_middleware(
             capture_output=True,
             text=True,
             timeout=10,
+            env=child_env(),
         )
     except FileNotFoundError:
         return MiddlewareResult(

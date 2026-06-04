@@ -3951,6 +3951,7 @@ def _run_command_once(parts, transcript, verbose, command_str):
             capture_output=True,
             text=True,
             timeout=300,
+            env=child_env(),
         )
     except subprocess.TimeoutExpired as e:
         raise AgentError(f"command timed out after 300s: {command_str}") from e
@@ -6589,7 +6590,7 @@ def resolve_provider(
         parts = shlex.split(model)
         if not parts:
             raise ConfigError("--model is empty for 'command' provider")
-        if not shutil.which(parts[0]):
+        if not shutil.which(parts[0], path=child_env().get("PATH", os.defpath)):
             raise ConfigError(f"command not found: {parts[0]}")
         model_id = model
         api_base = None
@@ -6625,8 +6626,9 @@ def resolve_commands(
     names = {c.strip() for c in commands if c.strip()}
     resolved_commands: dict[str, str] = {}
     base_resolved = Path(base_dir).resolve()
+    child_path = child_env().get("PATH", os.defpath)
     for name in sorted(names):
-        cmd_path = shutil.which(name)
+        cmd_path = shutil.which(name, path=child_path)
         if cmd_path is None:
             raise ConfigError(f"command {name!r} not found on PATH")
         abs_path = Path(cmd_path).resolve()
@@ -9457,9 +9459,7 @@ def _repl_run_custom_command(
             return None
         return cmd_name, content, cmd_path
 
-    env = None
-    if model_id:
-        env = {**os.environ, "SWIVAL_MODEL": model_id}
+    env = child_env({"SWIVAL_MODEL": model_id} if model_id else None)
 
     try:
         proc = subprocess.run(

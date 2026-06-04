@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Literal
 
+from ._env import child_env
 from .a2a_types import A2A_META_PREFIX
 from .terminal import TerminalSink
 
@@ -2644,7 +2645,10 @@ def _format_background_result(pid: int, log_rel_path: str) -> str:
 
 
 def _spawn_background_process(
-    popen_argv: list[str], base_dir: str, scratch_dir: str | None
+    popen_argv: list[str],
+    base_dir: str,
+    scratch_dir: str | None,
+    env: dict[str, str] | None = None,
 ):
     """Spawn a detached subprocess writing to a fresh background log file.
 
@@ -2665,6 +2669,7 @@ def _spawn_background_process(
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
         cwd=base_dir,
+        env=env if env is not None else child_env(),
         close_fds=True,
     )
     if sys.platform != "win32":
@@ -2805,10 +2810,11 @@ def _run_shell_command(
         shell_cmd = ["cmd.exe", "/c", command]
     else:
         shell_cmd = ["/bin/sh", "-c", command]
+    env = child_env()
 
     if background:
         try:
-            spawned = _spawn_background_process(shell_cmd, base_dir, scratch_dir)
+            spawned = _spawn_background_process(shell_cmd, base_dir, scratch_dir, env)
         except OSError as e:
             return f"error: failed to start shell command: {e}"
         if isinstance(spawned, str):
@@ -2822,6 +2828,7 @@ def _run_shell_command(
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             cwd=base_dir,
+            env=env,
         )
         if sys.platform != "win32":
             popen_kwargs["start_new_session"] = True
@@ -2954,6 +2961,8 @@ def _run_argv_command(
         return f"error: base directory is not a directory: {base_dir}"
 
     cmd_name = command[0]
+    env = child_env()
+    child_path = env.get("PATH", os.defpath)
 
     if unrestricted:
         if "/" in cmd_name or "\\" in cmd_name:
@@ -2962,7 +2971,7 @@ def _run_argv_command(
                 candidate = Path(base_dir) / candidate
             resolved_path = str(candidate.resolve())
         else:
-            found = shutil.which(cmd_name)
+            found = shutil.which(cmd_name, path=child_path)
             if found is None:
                 return f"error: command not found on PATH: {cmd_name!r}"
             resolved_path = str(Path(found).resolve())
@@ -2984,7 +2993,7 @@ def _run_argv_command(
     if background:
         try:
             spawned = _spawn_background_process(
-                [resolved_path] + command[1:], base_dir, scratch_dir
+                [resolved_path] + command[1:], base_dir, scratch_dir, env
             )
         except FileNotFoundError:
             return f'error: command executable not found: "{resolved_path}"'
@@ -3003,6 +3012,7 @@ def _run_argv_command(
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             cwd=base_dir,
+            env=env,
         )
         if sys.platform != "win32":
             popen_kwargs["start_new_session"] = True
