@@ -124,6 +124,8 @@ print(answer)
     max_turns: int = 100,
     max_output_tokens: int = 32768,
     max_context_tokens: int | None = None,
+    max_output_lines: int = 2000,
+    max_output_kb: int = 50,
     temperature: float | None = None,
     top_p: float | None = None,
     seed: int | None = None,
@@ -233,6 +235,14 @@ print(answer)
 <tr>
 <td><code>max_context_tokens</code></td>
 <td>Hard cap on context window size. <code>None</code> uses the provider's default.</td>
+</tr>
+<tr>
+<td><code>max_output_lines</code></td>
+<td>Default number of lines returned by file reads.</td>
+</tr>
+<tr>
+<td><code>max_output_kb</code></td>
+<td>Size cap in KB for tool output sent to the model (file reads, grep, listings, outline, fetch_url).</td>
 </tr>
 <tr>
 <td><code>temperature</code></td>

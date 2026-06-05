@@ -110,7 +110,7 @@
 <h2 id="prevention-output-size-guards">Prevention: Output Size Guards</h2>
 <p>Every tool that returns content has a hard cap on how much it can put into the conversation.</p>
 <ul>
-<li><strong>File reads</strong> are capped at 50KB, with individual lines truncated at 2,000 characters. Large files can be paginated with offset and limit parameters.</li>
+<li><strong>File reads</strong> are capped at 50KB, with individual lines truncated at 2,000 characters. Large files can be paginated with offset and limit parameters. The 50KB cap and the default 2000-line read limit are tunable with <code>max_output_kb</code> and <code>max_output_lines</code> (config keys or the matching CLI flags); the byte cap also applies to listings, grep, outline, and fetched URLs.</li>
 <li><strong>Directory listings</strong> return at most 100 entries.</li>
 <li><strong>Grep results</strong> return at most 100 matches.</li>
 <li><strong>Command output</strong> is returned inline up to 10KB. Anything larger is written to a temporary file and the conversation receives a short pointer with instructions to paginate.</li>

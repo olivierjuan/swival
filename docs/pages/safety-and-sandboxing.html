@@ -262,7 +262,7 @@ swival --yolo --files none &quot;commands only, no file access&quot;
 <p>Loopback addresses are allowed when the hostname is explicitly <code>localhost</code>, <code>127.0.0.1</code>, or <code>::1</code>, so agents can test locally running servers. Arbitrary hostnames that resolve to loopback addresses are still blocked to prevent DNS rebinding attacks. Redirect chains are handled manually and capped at ten hops.</p>
 <p>Binary MIME types are rejected. Response bodies are capped at 5 MB before conversion, and converted inline output is capped at 50 KB.</p>
 <h2 id="output-caps">Output Caps</h2>
-<p>Several hard caps keep the conversation bounded. File reads are limited to 50 KB per call and lines are truncated at 2,000 characters. Directory and grep-style listings are capped at 100 results.</p>
+<p>Several hard caps keep the conversation bounded. File reads are limited to 50 KB per call and lines are truncated at 2,000 characters. Directory and grep-style listings are capped at 100 results. The 50 KB cap (which also bounds listings, grep, outline, and URL fetches) and the default 2000-line read limit can be changed with the <code>max_output_kb</code> and <code>max_output_lines</code> settings.</p>
 <p>Command output is capped at 10 KB inline, with larger output written to <code>.swival/</code> (hard-capped at 1 MB) for paginated reads and auto-cleaned after roughly ten minutes.</p>
 <p>MCP tool output uses higher thresholds: 20 KB inline, with larger output written to <code>.swival/</code> and hard-capped at 10 MB before writing. MCP error output is inline-capped at 20 KB without file save.</p>
 <p>URL fetch output is capped at 50 KB inline, with larger output saved to files.</p>

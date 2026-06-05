@@ -117,6 +117,8 @@ model = &quot;qwen/qwen3-coder-next&quot;
 # system_prompt = &quot;...&quot;                 # replaces the built-in system prompt
 # no_system_prompt = false              # omit the system message entirely
 max_turns = 250
+# max_output_lines = 2000               # default line count for file reads
+# max_output_kb = 50                    # tool output size cap in KB (reads, grep, listings, outline, fetch)
 # temperature = 0.3
 # top_p = 0.9
 # seed = 42
@@ -343,6 +345,9 @@ Don't add dependencies without asking.
 <pre><code class="language-sh">swival --max-context-tokens 65536 &quot;task&quot;
 </code></pre>
 <p>For LM Studio, this can trigger a model reload. When both <code>--max-context-tokens</code> and <code>--max-output-tokens</code> are set, <code>--max-output-tokens</code> must be less than or equal to context length.</p>
+<p><code>--max-output-lines</code> and <code>--max-output-kb</code> bound how much tool output reaches the model. The first sets the default number of lines a file read returns (2000), the second the size cap in KB (50) applied to file reads, directory listings, grep, outline, and fetched URLs. Raise them for models with large context windows, lower them for small ones.</p>
+<pre><code class="language-sh">swival --max-output-lines 500 --max-output-kb 16 &quot;task&quot;
+</code></pre>
             <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="custom-commands.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Custom Commands</span></a><a class="nav-next" href="providers.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Providers</span></a></nav>
         </article>
         <aside class="page-toc" aria-label="On this page">
