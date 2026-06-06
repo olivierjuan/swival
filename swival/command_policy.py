@@ -211,26 +211,29 @@ class CommandPolicy:
 
 
 def prompt_approval(bucket: str, high_risk: bool = False) -> str:
+    from .fmt import suspend_live
+
     console = Console(stderr=True)
 
-    label = Text(bucket, style="bold")
-    if high_risk:
-        console.print(Text("⚠ high-risk ", style="bold red"), label, end="")
-    else:
-        console.print(Text("? ", style="bold yellow"), label, end="")
+    with suspend_live():
+        label = Text(bucket, style="bold")
+        if high_risk:
+            console.print(Text("⚠ high-risk ", style="bold red"), label, end="")
+        else:
+            console.print(Text("? ", style="bold yellow"), label, end="")
 
-    if high_risk:
-        hint = " [enter=deny / y=allow / p=persist / o=once / a=always-ask]: "
-    else:
-        hint = " [enter=allow / n=deny / p=persist / o=once / a=always-ask]: "
+        if high_risk:
+            hint = " [enter=deny / y=allow / p=persist / o=once / a=always-ask]: "
+        else:
+            hint = " [enter=allow / n=deny / p=persist / o=once / a=always-ask]: "
 
-    sys.stderr.write(hint)
-    sys.stderr.flush()
+        sys.stderr.write(hint)
+        sys.stderr.flush()
 
-    try:
-        answer = input().strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return "deny"
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return "deny"
 
     if answer == "":
         return "deny" if high_risk else "allow"

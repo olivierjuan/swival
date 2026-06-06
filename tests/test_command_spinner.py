@@ -3,10 +3,15 @@
 import contextlib
 import json
 import types
+from io import StringIO
+
+import pytest
 
 from swival import agent, fmt
 from swival.agent import _command_label, handle_tool_call
 from swival.thinking import ThinkingState
+
+from tests.conftest import styled_console
 
 
 def _make_tool_call(name, arguments, call_id="call_1"):
@@ -131,6 +136,51 @@ class TestSpinnerGating:
     def test_not_called_for_non_command_tool(self, monkeypatch, tmp_path):
         spy = _run(monkeypatch, tmp_path, "read_file", {"file_path": "x.txt"})
         assert spy.calls == []
+
+
+class TestSuspendLive:
+    @pytest.fixture
+    def tty_console(self, monkeypatch):
+        console = styled_console(StringIO())
+        monkeypatch.setattr(fmt, "_console", console)
+        return console
+
+    def test_noop_without_active_display(self):
+        with fmt.suspend_live():
+            pass
+
+    def test_suspend_stops_and_resumes_display(self, tty_console):
+        with fmt.command_spinner("sleep 1", timeout=30):
+            assert fmt._active_live_suspend is not None
+            with fmt.suspend_live():
+                assert tty_console._live_stack == []
+            assert len(tty_console._live_stack) == 1
+        assert fmt._active_live_suspend is None
+        assert tty_console._live_stack == []
+
+    def test_resume_after_dismiss_is_noop(self, tty_console):
+        with fmt.command_spinner("sleep 1", timeout=30) as dismiss:
+            suspend = fmt._active_live_suspend
+            resume = suspend()
+            dismiss()
+            resume()
+            assert tty_console._live_stack == []
+
+    def test_prompt_approval_suspends_display(self, tty_console, monkeypatch):
+        from swival import command_policy
+
+        seen = {}
+
+        def fake_input():
+            seen["live_stack"] = list(tty_console._live_stack)
+            return "y"
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        with fmt.command_spinner("sleep 1", timeout=30):
+            answer = command_policy.prompt_approval("sleep")
+            assert answer == "allow"
+            assert seen["live_stack"] == []
+            assert len(tty_console._live_stack) == 1
 
 
 class TestResultTransparency:

@@ -32,9 +32,29 @@ _stdout_console = Console(stderr=False)
 
 _think_count = 0
 
+_active_live_suspend = None
+
 
 def _noop(*_args, **_kwargs) -> None:
     return
+
+
+@contextlib.contextmanager
+def suspend_live():
+    """Temporarily stop the active live display so interactive prompts render cleanly.
+
+    No-op when no live display is running. The display resumes (with its
+    timing reset) when the block exits.
+    """
+    suspend = _active_live_suspend
+    if suspend is None:
+        yield
+        return
+    resume = suspend()
+    try:
+        yield
+    finally:
+        resume()
 
 
 def reset_state() -> None:
@@ -246,20 +266,36 @@ def command_spinner(label: str, timeout: float | None = None):
 
     advancer: threading.Thread | None = None
     if determinate:
+        (task,) = progress.tasks
 
         def _advance():
-            t0 = time.monotonic()
             while not stop.wait(0.1):
-                elapsed = min(time.monotonic() - t0, timeout)
-                progress.update(task_id, completed=elapsed)
+                progress.update(task_id, completed=min(task.elapsed, timeout))
 
         advancer = threading.Thread(target=_advance, daemon=True)
         advancer.start()
 
+    def _suspend():
+        progress.stop()
+
+        def _resume():
+            if dismissed.is_set():
+                return
+            progress.reset(task_id, total=timeout if determinate else None)
+            progress.start()
+
+        return _resume
+
+    global _active_live_suspend
+    _active_live_suspend = _suspend
+
     def dismiss() -> None:
+        global _active_live_suspend
         if dismissed.is_set():
             return
         dismissed.set()
+        if _active_live_suspend is _suspend:
+            _active_live_suspend = None
         stop.set()
         if advancer is not None:
             advancer.join(timeout=1)
