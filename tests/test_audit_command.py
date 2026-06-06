@@ -592,7 +592,7 @@ class TestRelativeImportResolution:
             "src/main.zig": 'const foo = @import("foo.zig");\nfoo.doit();\n',
             "src/foo.zig": "pub fn doit() void {}\n",
         }
-        imp_idx, call_idx = _build_context_indices(
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.zig", "src/foo.zig"], cache
         )
         assert imp_idx["src/main.zig"] == ["foo.zig"]
@@ -603,7 +603,9 @@ class TestRelativeImportResolution:
             "src/main.ts": 'import api from "./api";\n',
             "src/api.ts": "export function call() {}\n",
         }
-        imp_idx, call_idx = _build_context_indices(["src/main.ts", "src/api.ts"], cache)
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
+            ["src/main.ts", "src/api.ts"], cache
+        )
         assert call_idx["src/main.ts"] == ["src/api.ts"]
 
     def test_ts_nested_relative_resolves(self):
@@ -611,7 +613,7 @@ class TestRelativeImportResolution:
             "src/main.ts": 'import util from "./lib/util";\n',
             "src/lib/util.ts": "export function helper() {}\n",
         }
-        imp_idx, call_idx = _build_context_indices(
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.ts", "src/lib/util.ts"], cache
         )
         assert call_idx["src/main.ts"] == ["src/lib/util.ts"]
@@ -621,7 +623,7 @@ class TestRelativeImportResolution:
             "src/feature/main.ts": 'import shared from "../shared";\n',
             "src/shared.ts": "export function s() {}\n",
         }
-        imp_idx, call_idx = _build_context_indices(
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/feature/main.ts", "src/shared.ts"], cache
         )
         assert call_idx["src/feature/main.ts"] == ["src/shared.ts"]
@@ -631,7 +633,7 @@ class TestRelativeImportResolution:
             "src/main.ts": 'import lib from "./lib";\n',
             "src/lib/index.ts": "export function f() {}\n",
         }
-        imp_idx, call_idx = _build_context_indices(
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.ts", "src/lib/index.ts"], cache
         )
         assert call_idx["src/main.ts"] == ["src/lib/index.ts"]
@@ -641,7 +643,7 @@ class TestRelativeImportResolution:
             "src/main.ts": 'import react from "react";\n',
             "src/local.ts": "export function f() {}\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.ts", "src/local.ts"], cache
         )
         assert "src/main.ts" not in call_idx
@@ -652,7 +654,7 @@ class TestRelativeImportResolution:
             "src/react.ts": "export function fake() {}\n",
             "src/local.ts": "export function real() {}\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.ts", "src/react.ts", "src/local.ts"], cache
         )
         # Bare specifier `react` is an NPM package; even though src/react.ts
@@ -664,7 +666,7 @@ class TestRelativeImportResolution:
             "src/main.zig": 'const foo = @import("foo.zig");\n',
             "src/foo.zig": "pub fn x() void {}\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.zig", "src/foo.zig"], cache
         )
         assert call_idx["src/main.zig"] == ["src/foo.zig"]
@@ -732,7 +734,7 @@ class TestZigImportResolution:
             "src/std.zig": "pub fn fake() void {}\n",
             "src/foo.zig": "pub fn real() void {}\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/main.zig", "src/std.zig", "src/foo.zig"], cache
         )
         assert call_idx.get("src/main.zig") == ["src/foo.zig"]
@@ -742,7 +744,7 @@ class TestZigImportResolution:
             "src/sub/main.zig": 'const foo = @import("foo.zig");\n',
             "src/sub/foo.zig": "pub fn x() void {}\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["src/sub/main.zig", "src/sub/foo.zig"], cache
         )
         assert call_idx["src/sub/main.zig"] == ["src/sub/foo.zig"]
@@ -759,7 +761,7 @@ class TestPythonRelativeImports:
             "pkg/sub/main.py": "from .lib import helper\n",
             "pkg/sub/lib.py": "def helper(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/sub/lib.py"], cache
         )
         assert "pkg/sub/lib.py" in call_idx["pkg/sub/main.py"]
@@ -769,7 +771,7 @@ class TestPythonRelativeImports:
             "pkg/sub/main.py": "from ..util import other\n",
             "pkg/util.py": "def other(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/util.py"], cache
         )
         assert "pkg/util.py" in call_idx["pkg/sub/main.py"]
@@ -779,7 +781,7 @@ class TestPythonRelativeImports:
             "pkg/sub/main.py": "from ..util.helpers import x\n",
             "pkg/util/helpers.py": "def x(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/util/helpers.py"], cache
         )
         assert "pkg/util/helpers.py" in call_idx["pkg/sub/main.py"]
@@ -789,7 +791,7 @@ class TestPythonRelativeImports:
             "pkg/sub/main.py": "from .lib import x\n",
             "pkg/sub/lib/__init__.py": "def x(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/sub/lib/__init__.py"], cache
         )
         assert "pkg/sub/lib/__init__.py" in call_idx["pkg/sub/main.py"]
@@ -799,7 +801,7 @@ class TestPythonRelativeImports:
             "pkg/sub/main.py": "from . import lib\n",
             "pkg/sub/lib.py": "def x(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/sub/lib.py"], cache
         )
         assert "pkg/sub/lib.py" in call_idx["pkg/sub/main.py"]
@@ -810,7 +812,7 @@ class TestPythonRelativeImports:
             "pkg/sub/lib.py": "def x(): pass\n",
             "pkg/sub/helpers.py": "def y(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/sub/lib.py", "pkg/sub/helpers.py"], cache
         )
         assert "pkg/sub/lib.py" in call_idx["pkg/sub/main.py"]
@@ -821,7 +823,7 @@ class TestPythonRelativeImports:
             "pkg/sub/main.py": "from .. import util\n",
             "pkg/util.py": "def x(): pass\n",
         }
-        _imp_idx, call_idx = _build_context_indices(
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["pkg/sub/main.py", "pkg/util.py"], cache
         )
         assert "pkg/util.py" in call_idx["pkg/sub/main.py"]
@@ -1219,7 +1221,9 @@ class TestBuildContextIndices:
             "lib.py": "def handle_request():\n    pass\n",
             "app.py": "from lib import handle_request\nhandle_request()\n",
         }
-        imp_idx, call_idx = _build_context_indices(["lib.py", "app.py"], cache)
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
+            ["lib.py", "app.py"], cache
+        )
 
         assert "lib" in imp_idx["app.py"]
         assert call_idx["app.py"] == ["lib.py"]
@@ -1229,7 +1233,7 @@ class TestBuildContextIndices:
         cache = {
             "lib.py": "def handle_request():\n    handle_request()\n",
         }
-        _imp_idx, call_idx = _build_context_indices(["lib.py"], cache)
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(["lib.py"], cache)
         assert "lib.py" not in call_idx
 
     def test_symbol_exported_from_multiple_files(self):
@@ -1238,7 +1242,9 @@ class TestBuildContextIndices:
             "b.py": "def shared():\n    pass\n",
             "c.py": "shared()\n",
         }
-        _imp_idx, call_idx = _build_context_indices(["a.py", "b.py", "c.py"], cache)
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
+            ["a.py", "b.py", "c.py"], cache
+        )
         assert call_idx["c.py"] == ["a.py", "b.py"]
 
     def test_substring_does_not_match(self):
@@ -1246,7 +1252,9 @@ class TestBuildContextIndices:
             "lib.py": "def run():\n    pass\n",
             "app.py": "rerun()\nprerun()\nrunner()\n",
         }
-        _imp_idx, call_idx = _build_context_indices(["lib.py", "app.py"], cache)
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
+            ["lib.py", "app.py"], cache
+        )
         assert "app.py" not in call_idx
 
     def test_underscore_and_digit_identifiers(self):
@@ -1254,7 +1262,9 @@ class TestBuildContextIndices:
             "lib.py": "def handle_v2():\n    pass\n\ndef _private():\n    pass\n",
             "app.py": "handle_v2()\n_private()\n",
         }
-        _imp_idx, call_idx = _build_context_indices(["lib.py", "app.py"], cache)
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
+            ["lib.py", "app.py"], cache
+        )
         assert call_idx["app.py"] == ["lib.py"]
 
     def test_no_overlap_no_entry(self):
@@ -1262,7 +1272,9 @@ class TestBuildContextIndices:
             "lib.py": "def alpha():\n    pass\n",
             "app.py": "print('hello world')\n",
         }
-        _imp_idx, call_idx = _build_context_indices(["lib.py", "app.py"], cache)
+        _imp_idx, call_idx, _spans_idx = _build_context_indices(
+            ["lib.py", "app.py"], cache
+        )
         assert call_idx == {}
 
     def test_perl_package_import_resolves_to_caller(self):
@@ -1270,7 +1282,7 @@ class TestBuildContextIndices:
             "lib/Acme/Tool.pm": "package Acme::Tool;\n1;\n",
             "bin/app.pl": "use Acme::Tool;\n",
         }
-        imp_idx, call_idx = _build_context_indices(
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["lib/Acme/Tool.pm", "bin/app.pl"], cache
         )
         assert imp_idx["bin/app.pl"] == ["Acme::Tool"]
@@ -1281,7 +1293,7 @@ class TestBuildContextIndices:
             "lib/Foo/Bar.pm": "package Foo::Bar;\n1;\n",
             "bin/app.pl": 'require "lib/Foo/Bar.pm";\n',
         }
-        imp_idx, call_idx = _build_context_indices(
+        imp_idx, call_idx, _spans_idx = _build_context_indices(
             ["lib/Foo/Bar.pm", "bin/app.pl"], cache
         )
         assert imp_idx["bin/app.pl"] == ["lib/Foo/Bar.pm"]
@@ -3331,7 +3343,7 @@ class TestVerificationGates:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: (_ for _ in ()).throw(
+            lambda vf, patch_fn, patch_text, state, ctx: (_ for _ in ()).throw(
                 RuntimeError("boom")
             ),
         )
@@ -3372,7 +3384,7 @@ class TestVerificationGates:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         _run_audit_phases(
@@ -3415,7 +3427,7 @@ class TestVerificationGates:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         _run_audit_phases(
@@ -3458,7 +3470,7 @@ class TestVerificationGates:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         _run_audit_phases(
@@ -3499,7 +3511,7 @@ class TestVerificationGates:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         result = _run_audit_phases(
@@ -3546,7 +3558,7 @@ class TestVerificationGates:
 
         monkeypatch.setattr(audit_mod, "_worktree", FakeWorktree)
         monkeypatch.setattr(
-            audit_mod, "_gather_evidence", lambda finding, ctx: ("source", 1)
+            audit_mod, "_gather_evidence", lambda finding, state, ctx: ("source", 1)
         )
         monkeypatch.setattr(audit_mod, "_make_isolated_loop_kwargs", fake_kwargs)
         monkeypatch.setattr(
@@ -3619,7 +3631,7 @@ class TestVerificationGates:
 
         monkeypatch.setattr(
             "swival.audit._gather_evidence",
-            lambda finding, ctx: ("--- main.c ---\ncode", 1),
+            lambda finding, state, ctx: ("--- main.c ---\ncode", 1),
         )
         monkeypatch.setattr(
             "swival.audit._worktree", lambda base_dir, work_dir: DummyWorktree(work_dir)
@@ -4060,7 +4072,7 @@ class TestPhase4Parallelism:
 
         monkeypatch.setattr("swival.audit._worktree", FailingWorktree)
         monkeypatch.setattr(
-            "swival.audit._gather_evidence", lambda f, c: ("evidence", 1)
+            "swival.audit._gather_evidence", lambda f, s, c: ("evidence", 1)
         )
 
         ctx = SimpleNamespace(
@@ -4092,7 +4104,7 @@ class TestPhase4Parallelism:
 
         monkeypatch.setattr("swival.audit._worktree", FailingWorktree)
         monkeypatch.setattr(
-            "swival.audit._gather_evidence", lambda f, c: ("evidence", 1)
+            "swival.audit._gather_evidence", lambda f, s, c: ("evidence", 1)
         )
 
         ctx = SimpleNamespace(
@@ -4121,7 +4133,7 @@ class TestPhase4Parallelism:
 
         monkeypatch.setattr("swival.audit._worktree", DummyWorktree)
         monkeypatch.setattr(
-            "swival.audit._gather_evidence", lambda f, c: ("evidence", 1)
+            "swival.audit._gather_evidence", lambda f, s, c: ("evidence", 1)
         )
 
         def crash_loop(msgs, tools, **kw):
@@ -4157,7 +4169,7 @@ class TestPhase4Parallelism:
 
         monkeypatch.setattr("swival.audit._worktree", DummyWorktree)
         monkeypatch.setattr(
-            "swival.audit._gather_evidence", lambda f, c: ("evidence", 1)
+            "swival.audit._gather_evidence", lambda f, s, c: ("evidence", 1)
         )
 
         def crash_loop(msgs, tools, **kw):
@@ -4194,7 +4206,7 @@ class TestPhase4Parallelism:
 
         monkeypatch.setattr("swival.audit._worktree", DummyWorktree)
         monkeypatch.setattr(
-            "swival.audit._gather_evidence", lambda f, c: ("evidence", 1)
+            "swival.audit._gather_evidence", lambda f, s, c: ("evidence", 1)
         )
 
         def crash_loop(msgs, tools, **kw):
@@ -4230,7 +4242,7 @@ class TestPhase4Parallelism:
 
         monkeypatch.setattr("swival.audit._worktree", DummyWorktree)
         monkeypatch.setattr(
-            "swival.audit._gather_evidence", lambda f, c: ("evidence", 1)
+            "swival.audit._gather_evidence", lambda f, s, c: ("evidence", 1)
         )
         monkeypatch.setattr(
             "swival.agent.run_agent_loop",
@@ -5242,7 +5254,7 @@ class TestAutoRetry:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# Report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# Report",
         )
 
         ctx = SimpleNamespace(
@@ -6055,7 +6067,7 @@ class TestSelectAll:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# Report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# Report",
         )
 
     def test_select_all_skips_phase2_triage(self, monkeypatch, tmp_path):
@@ -7192,7 +7204,7 @@ class TestPhase45Adjudication:
         )
 
     def _adj(self, tmp_path, monkeypatch, vf, fake):
-        monkeypatch.setattr("swival.audit._gather_evidence", lambda f, c: ("ev", 1))
+        monkeypatch.setattr("swival.audit._gather_evidence", lambda f, s, c: ("ev", 1))
         monkeypatch.setattr("swival.audit._call_audit_llm", fake)
         return _adjudicate_one((0, vf), self._state(tmp_path), self._ctx(tmp_path))
 
@@ -7301,7 +7313,7 @@ class TestPhase45Adjudication:
                 return ruling
             return keep_block if "real remote bug" in user else drop_block
 
-        monkeypatch.setattr("swival.audit._gather_evidence", lambda f, c: ("ev", 1))
+        monkeypatch.setattr("swival.audit._gather_evidence", lambda f, s, c: ("ev", 1))
         monkeypatch.setattr("swival.audit._call_audit_llm", fake_call)
 
         ui = AuditUI(run_id="t", branch="main", commit="abc", workers=2, total_files=1)
@@ -7406,3 +7418,551 @@ class TestAdjudicationHelpers:
         assert _less_severe_of("high", "medium") == "medium"
         assert _less_severe_of("low", "critical") == "low"
         assert _less_severe_of("high", "high") == "high"
+
+
+# ---------------------------------------------------------------------------
+# Cross-file callee context
+# ---------------------------------------------------------------------------
+
+_CALLEE_MAIN_PY = """\
+from .auth import parse_token
+
+def handle(req):
+    tok = parse_token(req.cookie)
+    if not check_origin(req):
+        return None
+    return render(tok)
+"""
+
+_CALLEE_AUTH_PY = """\
+def parse_token(raw):
+    if not raw:
+        return None
+    return raw.split(".")[0]
+"""
+
+_CALLEE_WEB_PY = """\
+def check_origin(req):
+    return req.origin == "ok"
+
+def render(tpl):
+    return tpl
+"""
+
+
+def _make_callee_state(tmp_path, files, contents):
+    imp_idx, dep_idx, spans_idx = _build_context_indices(files, contents)
+    scope = AuditScope(
+        branch="b",
+        commit="c" * 40,
+        tracked_files=list(files),
+        mandatory_files=list(files),
+        focus=[],
+    )
+    state = AuditRunState(
+        run_id="r1",
+        scope=scope,
+        queued_files=list(files),
+        state_dir=tmp_path / ".swival" / "audit",
+        import_index=imp_idx,
+        caller_index=dep_idx,
+        symbol_spans_index=spans_idx,
+    )
+    state._content_cache.update(contents)
+    return state
+
+
+def _callee_ctx(tmp_path):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(base_dir=str(tmp_path), tools=[], loop_kwargs={})
+
+
+def _default_callee_state(tmp_path):
+    files = ["pkg/main.py", "pkg/auth.py", "pkg/web.py"]
+    contents = {
+        "pkg/main.py": _CALLEE_MAIN_PY,
+        "pkg/auth.py": _CALLEE_AUTH_PY,
+        "pkg/web.py": _CALLEE_WEB_PY,
+    }
+    return _make_callee_state(tmp_path, files, contents), contents
+
+
+class TestCallSites:
+    def test_dotted_call_yields_trailing_name(self):
+        from swival.audit import _call_sites
+
+        sites = _call_sites("x = obj.parse_token(raw)\nmod.sub.check(y)\n")
+        assert sites["parse_token"] == [1]
+        assert sites["check"] == [2]
+        assert "obj" not in sites
+
+    def test_strings_and_comments_excluded(self):
+        from swival.audit import _call_sites
+
+        src = (
+            'a = "fake_call(1)"\n'
+            "// other_fake(2)\n"
+            "/* third_fake(3)\n   spanning */\n"
+            "real_call(4)\n"
+        )
+        sites = _call_sites(src)
+        assert "fake_call" not in sites
+        assert "other_fake" not in sites
+        assert "third_fake" not in sites
+        assert sites["real_call"] == [5]
+
+    def test_line_numbers_exact_after_block_comment(self):
+        from swival.audit import _call_sites
+
+        src = "/* one\n   two\n   three */\ntarget(1)\n"
+        assert _call_sites(src)["target"] == [4]
+
+    def test_keywords_skipped_and_same_line_deduped(self):
+        from swival.audit import _call_sites
+
+        sites = _call_sites("if (x) { return f(y) + f(z); }\n")
+        assert "if" not in sites
+        assert "return" not in sites
+        assert sites["f"] == [1]
+
+
+class TestCalleeResolutionTiers:
+    def test_explicit_import_beats_broad_index(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        files = ["pkg/main.py", "pkg/auth.py", "pkg/unrelated.py"]
+        contents = {
+            "pkg/main.py": "from .auth import init\n\ndef go(x):\n    return init(x)\n",
+            "pkg/auth.py": "def init(x):\n    return x\n",
+            "pkg/unrelated.py": "def init(y):\n    return y + 1\n",
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        # Both files export `init`, so the broad dependency index links both.
+        assert "pkg/unrelated.py" in state.dependency_index["pkg/main.py"]
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert "pkg/auth.py:1-2" in out
+        assert "pkg/unrelated.py" not in out
+
+    def test_broad_index_still_resolves_unimported_callees(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        state, contents = _default_callee_state(tmp_path)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        # parse_token via the explicit import, check_origin/render via the
+        # broad dependency index.
+        assert "--- parse_token (pkg/auth.py:1-4" in out
+        assert "--- check_origin (pkg/web.py:1-2" in out
+        assert "--- render (pkg/web.py:4-5" in out
+
+    def test_own_definitions_never_inlined(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        files = ["pkg/main.py", "pkg/dep.py"]
+        contents = {
+            "pkg/main.py": "def handle(x):\n    return handle(x - 1)\n",
+            "pkg/dep.py": "def handle(x):\n    return x\n",
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert out == "(none)"
+
+    def test_ambiguous_name_dropped_and_listed(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        files = ["pkg/main.py", "pkg/a.py", "pkg/b.py", "pkg/c.py"]
+        body = "def init(x):\n    return x\n"
+        contents = {
+            "pkg/main.py": (
+                "from .a import init\nfrom .b import init\nfrom .c import init\n"
+                "\ndef go(x):\n    return init(x)\n"
+            ),
+            "pkg/a.py": body,
+            "pkg/b.py": body,
+            "pkg/c.py": body,
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert "--- init" not in out
+        assert "(ambiguous, not shown: init)" in out
+
+    def test_exclude_files_suppresses_bundled_definitions(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        state, contents = _default_callee_state(tmp_path)
+        out = _gather_callee_context(
+            "pkg/main.py",
+            contents["pkg/main.py"],
+            state,
+            _callee_ctx(tmp_path),
+            exclude_files={"pkg/auth.py"},
+        )
+        assert "parse_token" not in out
+        assert "--- check_origin" in out
+
+
+class TestCalleeGatherer:
+    def test_render_order_follows_first_call_site(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        state, contents = _default_callee_state(tmp_path)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        # Call order in main: parse_token (line 4), check_origin (5), render (7).
+        assert (
+            out.index("--- parse_token")
+            < out.index("--- check_origin")
+            < out.index("--- render")
+        )
+
+    def test_relevant_symbols_win_admission_under_tight_budget(
+        self, monkeypatch, tmp_path
+    ):
+        import swival.audit as audit_mod
+        from swival.audit import _gather_callee_context
+
+        state, contents = _default_callee_state(tmp_path)
+        state.triage_records["pkg/main.py"] = TriageRecord(
+            path="pkg/main.py",
+            priority="ESCALATE_HIGH",
+            confidence="high",
+            bug_classes=[],
+            summary="",
+            relevant_symbols=["render"],
+            suspicious_flows=[],
+            needs_followup=False,
+        )
+        # Budget fits exactly one block; `render` is called once while the
+        # others come first, so only the relevant_symbols priority can pick it.
+        monkeypatch.setattr(audit_mod, "_CALLEE_BUNDLE_CAP", 120)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert "--- render (pkg/web.py:4-5" in out
+        assert "parse_token (pkg/auth.py:1-4) [omitted: bundle budget]" in out
+        assert "check_origin (pkg/web.py:1-2) [omitted: bundle budget]" in out
+
+    def test_body_cap_and_bundle_budget_use_distinct_wording(
+        self, monkeypatch, tmp_path
+    ):
+        import swival.audit as audit_mod
+        from swival.audit import _gather_callee_context
+
+        state, contents = _default_callee_state(tmp_path)
+        monkeypatch.setattr(audit_mod, "_CALLEE_BODY_CAP", 20)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert "[truncated at 20 bytes; full definition at pkg/auth.py:1-4]" in out
+        assert "[omitted: bundle budget]" not in out
+
+        monkeypatch.setattr(audit_mod, "_CALLEE_BODY_CAP", 8_000)
+        monkeypatch.setattr(audit_mod, "_CALLEE_BUNDLE_CAP", 120)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert "[omitted: bundle budget]" in out
+        assert "[truncated at" not in out
+
+    def test_body_cap_is_byte_accurate_on_multibyte_content(
+        self, monkeypatch, tmp_path
+    ):
+        import swival.audit as audit_mod
+        from swival.audit import _gather_callee_context
+
+        files = ["pkg/main.py", "pkg/dep.py"]
+        contents = {
+            "pkg/main.py": "from .dep import emoji\n\ndef go(x):\n    return emoji(x)\n",
+            "pkg/dep.py": 'def emoji(x):\n    return "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9" + x\n',
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        monkeypatch.setattr(audit_mod, "_CALLEE_BODY_CAP", 25)
+        out = _gather_callee_context(
+            "pkg/main.py", contents["pkg/main.py"], state, _callee_ctx(tmp_path)
+        )
+        assert "[truncated at 25 bytes" in out
+        body = out.split("---\n", 1)[1].split("\n[truncated", 1)[0]
+        # Cap measured on encoded bytes, and a split code point is dropped
+        # rather than crashing the decode.
+        assert len(body.encode("utf-8")) <= 25
+
+    def test_no_callees_returns_none_sentinel(self, tmp_path):
+        from swival.audit import _gather_callee_context
+
+        files = ["pkg/alone.py"]
+        contents = {"pkg/alone.py": "def solo(x):\n    return solo(x - 1)\n"}
+        state = _make_callee_state(tmp_path, files, contents)
+        out = _gather_callee_context(
+            "pkg/alone.py", contents["pkg/alone.py"], state, _callee_ctx(tmp_path)
+        )
+        assert out == "(none)"
+
+    def test_content_cache_loads_each_dependency_once(self, monkeypatch, tmp_path):
+        # Sequential on purpose: the dict cache guarantees correctness, not
+        # single-load under concurrency.
+        import swival.audit as audit_mod
+        from swival.audit import _gather_callee_context
+
+        files = ["pkg/one.py", "pkg/two.py", "pkg/util.py"]
+        contents = {
+            "pkg/one.py": "from .util import shared\n\ndef a(x):\n    return shared(x)\n",
+            "pkg/two.py": "from .util import shared\n\ndef b(x):\n    return shared(x)\n",
+            "pkg/util.py": "def shared(x):\n    return x\n",
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        state._content_cache.clear()
+        calls: list[str] = []
+
+        def fake_git_show(path, base_dir):
+            calls.append(path)
+            return contents[path]
+
+        monkeypatch.setattr(audit_mod, "_git_show", fake_git_show)
+        ctx = _callee_ctx(tmp_path)
+        _gather_callee_context("pkg/one.py", contents["pkg/one.py"], state, ctx)
+        _gather_callee_context("pkg/two.py", contents["pkg/two.py"], state, ctx)
+        assert calls.count("pkg/util.py") == 1
+
+
+class TestGatherEvidenceCallees:
+    def test_merged_section_shared_helper_renders_once(self, tmp_path):
+        from swival.audit import _CALLEE_SECTION_HEADER, _gather_evidence
+
+        files = ["pkg/a.py", "pkg/b.py", "pkg/util.py"]
+        contents = {
+            "pkg/a.py": "from .util import shared\n\ndef fa(x):\n    return shared(x)\n",
+            "pkg/b.py": "from .util import shared\n\ndef fb(x):\n    return shared(x)\n",
+            "pkg/util.py": "def shared(x):\n    return x\n",
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        finding = FindingRecord(
+            title="t",
+            finding_type="injection",
+            severity="low",
+            locations=["pkg/a.py:3", "pkg/b.py:3"],
+            preconditions=[],
+            proof=[],
+            fix_outline="",
+            source_file="pkg/a.py",
+        )
+        text, n_files = _gather_evidence(finding, state, _callee_ctx(tmp_path))
+        assert n_files == 2
+        assert _CALLEE_SECTION_HEADER in text
+        assert text.count("--- shared (pkg/util.py:1-2") == 1
+        # Combined per-file call-site attribution.
+        assert "pkg/a.py:4" in text
+        assert "pkg/b.py:4" in text
+
+    def test_bundle_files_never_reappear_as_callee_blocks(self, tmp_path):
+        from swival.audit import _gather_evidence
+
+        state, contents = _default_callee_state(tmp_path)
+        finding = FindingRecord(
+            title="t",
+            finding_type="injection",
+            severity="low",
+            locations=["pkg/main.py:4", "pkg/auth.py:1"],
+            preconditions=[],
+            proof=[],
+            fix_outline="",
+            source_file="pkg/main.py",
+        )
+        text, n_files = _gather_evidence(finding, state, _callee_ctx(tmp_path))
+        assert n_files == 2
+        # auth.py is in the bundle, so parse_token must not repeat as a block.
+        assert "--- parse_token" not in text
+        assert "--- check_origin" in text
+
+    def test_global_budget_covers_the_whole_merged_section(self, monkeypatch, tmp_path):
+        import swival.audit as audit_mod
+        from swival.audit import _gather_evidence
+
+        # Three primaries, each calling its own dedicated helper big enough
+        # that the cap fits only one body.
+        helper = (
+            "def helper_{n}(x):\n"
+            + "    x += 1  # padding line\n" * 6
+            + "    return x\n"
+        )
+        files = [
+            "pkg/p1.py",
+            "pkg/p2.py",
+            "pkg/p3.py",
+            "pkg/h1.py",
+            "pkg/h2.py",
+            "pkg/h3.py",
+        ]
+        contents = {
+            "pkg/p1.py": "from .h1 import helper_1\n\ndef f1(x):\n    return helper_1(x)\n",
+            "pkg/p2.py": "from .h2 import helper_2\n\ndef f2(x):\n    return helper_2(x)\n",
+            "pkg/p3.py": "from .h3 import helper_3\n\ndef f3(x):\n    return helper_3(x)\n",
+            "pkg/h1.py": helper.format(n=1),
+            "pkg/h2.py": helper.format(n=2),
+            "pkg/h3.py": helper.format(n=3),
+        }
+        state = _make_callee_state(tmp_path, files, contents)
+        monkeypatch.setattr(audit_mod, "_CALLEE_BUNDLE_CAP", 320)
+        finding = FindingRecord(
+            title="t",
+            finding_type="injection",
+            severity="low",
+            locations=["pkg/p1.py:4", "pkg/p2.py:4", "pkg/p3.py:4"],
+            preconditions=[],
+            proof=[],
+            fix_outline="",
+            source_file="pkg/p1.py",
+        )
+        text, _n = _gather_evidence(finding, state, _callee_ctx(tmp_path))
+        full_blocks = text.count("--- helper_")
+        omitted = text.count("[omitted: bundle budget]")
+        # One global cap across all three primaries, not 3x.
+        assert full_blocks == 1
+        assert omitted == 2
+
+
+class TestPhase3AAssembly:
+    def _capture_llm(self, monkeypatch, response="@@ none @@"):
+        captured: dict = {}
+
+        def fake_llm(ctx, messages, temperature=None, trace_task=None):
+            captured["system"] = messages[0]["content"]
+            captured["user"] = messages[-1]["content"]
+            return response
+
+        monkeypatch.setattr("swival.audit._call_audit_llm", fake_llm)
+        return captured
+
+    def test_suffix_contains_callee_section_not_related_context(
+        self, monkeypatch, tmp_path
+    ):
+        from swival.audit import _CALLEE_SECTION_HEADER, _phase3a_inventory
+
+        state, contents = _default_callee_state(tmp_path)
+        captured = self._capture_llm(monkeypatch)
+        records = _phase3a_inventory(
+            "pkg/main.py", state, _callee_ctx(tmp_path), contents["pkg/main.py"]
+        )
+        assert records == []
+        assert _CALLEE_SECTION_HEADER in captured["user"]
+        assert "--- parse_token (pkg/auth.py:1-4" in captured["user"]
+        assert "Related context:" not in captured["user"]
+        from swival.audit import _CALLEE_PROMPT_NOTE
+
+        assert _CALLEE_PROMPT_NOTE in captured["system"]
+
+    def test_suffix_renders_none_when_nothing_resolves(self, monkeypatch, tmp_path):
+        from swival.audit import _CALLEE_SECTION_HEADER, _phase3a_inventory
+
+        files = ["pkg/alone.py"]
+        contents = {"pkg/alone.py": "def solo(x):\n    return x\n"}
+        state = _make_callee_state(tmp_path, files, contents)
+        captured = self._capture_llm(monkeypatch)
+        _phase3a_inventory(
+            "pkg/alone.py", state, _callee_ctx(tmp_path), contents["pkg/alone.py"]
+        )
+        assert f"{_CALLEE_SECTION_HEADER}\n(none)" in captured["user"]
+
+
+class TestPhase5StateThreading:
+    def test_report_prompt_carries_callee_section(self, monkeypatch, tmp_path):
+        from swival.audit import _CALLEE_SECTION_HEADER, _phase5_report
+
+        state, contents = _default_callee_state(tmp_path)
+        captured: dict = {}
+
+        def fake_llm(ctx, messages, temperature=None, trace_task=None):
+            captured["user"] = messages[-1]["content"]
+            return "# Report"
+
+        monkeypatch.setattr("swival.audit._call_audit_llm", fake_llm)
+        vf = VerifiedFinding(
+            finding=FindingRecord(
+                title="t",
+                finding_type="injection",
+                severity="low",
+                locations=["pkg/main.py:4"],
+                preconditions=[],
+                proof=[],
+                fix_outline="",
+                source_file="pkg/main.py",
+            ),
+            correctness_reason="r",
+            rebuttal_reason="r",
+        )
+        out = _phase5_report(vf, "001-t.patch", "diff", state, _callee_ctx(tmp_path))
+        assert out == "# Report"
+        assert _CALLEE_SECTION_HEADER in captured["user"]
+        assert "--- parse_token (pkg/auth.py:1-4" in captured["user"]
+
+
+class TestSymbolSpansIndexState:
+    def test_build_context_indices_returns_span_index(self):
+        files = ["pkg/main.py", "pkg/auth.py"]
+        contents = {"pkg/main.py": _CALLEE_MAIN_PY, "pkg/auth.py": _CALLEE_AUTH_PY}
+        _imp, _dep, spans = _build_context_indices(files, contents)
+        assert spans["pkg/auth.py"]["parse_token"]["start"] == 1
+        assert spans["pkg/auth.py"]["parse_token"]["end"] == 4
+        assert spans["pkg/auth.py"]["parse_token"]["kind"] == "function"
+
+    def test_state_round_trips_span_index(self, tmp_path):
+        state, _contents = _default_callee_state(tmp_path)
+        state.save()
+        loaded = AuditRunState.load(state.state_dir, "r1")
+        assert loaded.symbol_spans_index == state.symbol_spans_index
+        assert loaded._content_cache == {}
+
+    def test_load_leaves_legacy_state_empty_repair_happens_in_runner(
+        self, monkeypatch, tmp_path
+    ):
+        import json
+
+        import swival.audit as audit_mod
+        from swival.audit import _ensure_symbol_spans_index
+
+        state, contents = _default_callee_state(tmp_path)
+        state.save()
+        state_file = state.state_dir / "r1" / "state.json"
+        blob = json.loads(state_file.read_text())
+        del blob["symbol_spans_index"]
+        state_file.write_text(json.dumps(blob))
+
+        loader_calls: list[list[str]] = []
+
+        def fake_loader(files, base_dir):
+            loader_calls.append(list(files))
+            return contents
+
+        monkeypatch.setattr(audit_mod, "_load_file_contents", fake_loader)
+
+        loaded = AuditRunState.load(state.state_dir, "r1")
+        # Pure deserialization: no rebuild inside load().
+        assert loaded.symbol_spans_index == {}
+        assert loader_calls == []
+
+        _ensure_symbol_spans_index(loaded, str(tmp_path))
+        assert loader_calls == [list(loaded.scope.mandatory_files)]
+        assert loaded.symbol_spans_index == state.symbol_spans_index
+        # The repair persisted.
+        reloaded = AuditRunState.load(state.state_dir, "r1")
+        assert reloaded.symbol_spans_index == state.symbol_spans_index
+
+    def test_repair_skipped_when_index_present(self, monkeypatch, tmp_path):
+        import swival.audit as audit_mod
+        from swival.audit import _ensure_symbol_spans_index
+
+        state, _contents = _default_callee_state(tmp_path)
+
+        def boom(files, base_dir):
+            raise AssertionError("must not reload contents")
+
+        monkeypatch.setattr(audit_mod, "_load_file_contents", boom)
+        _ensure_symbol_spans_index(state, str(tmp_path))

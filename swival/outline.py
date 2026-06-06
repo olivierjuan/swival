@@ -1,10 +1,13 @@
 """Structural code outline tool — returns declarations without bodies."""
 
 import ast
+import bisect
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import tools
+from .codeparse import mask_noncode
 from .tools import safe_resolve
 
 _MAX_OUTLINE_FILES = 20
@@ -229,6 +232,216 @@ def _outline_heuristic(source: str, depth: int) -> str:
                 display = display[:117] + "..."
             lines_out.append(f"{lineno:<5}{indent}{display}")
     return "\n".join(lines_out) if lines_out else "no declarations found"
+
+
+# ---------------------------------------------------------------------------
+# Symbol span extraction
+# ---------------------------------------------------------------------------
+
+_SPAN_MAX_LINES = 300
+
+# How many lines past a declaration to look for a `{` or a top-level `;`
+# before giving up on brace counting and falling back to indentation. Covers
+# Allman-style braces and multi-line signatures without scanning a whole
+# brace-less (Ruby-style) body character by character.
+_BRACE_SEARCH_LINES = 5
+
+_FUNC_KINDS = frozenset({"def", "function", "fn", "func", "fun", "sub"})
+
+# Deliberately narrower than _STRUCT_RE above: span extraction needs a name
+# capture and a kind classification, and skips nameless/system declarations
+# (test, mod, package). Keep keyword additions to either grammar in sync.
+_SPAN_DECL_RE = re.compile(
+    r"^(?:(?:[\w()]+|\"[^\"]+\")\s+){0,6}?"
+    r"(def|class|function|fn|func|fun|sub|type|typedef|struct|impl|interface|"
+    r"module|namespace|protocol|enum|trait|union)\s+"
+    r"(?:\w+\.)?(\w+)"
+)
+
+_VALUE_NAME_RE = re.compile(r"^(?:export\s+)?(?:pub\s+)?(?:const|var|let)\s+(\w+)")
+
+
+@dataclass
+class SymbolSpan:
+    """Line span of one top-level symbol definition (1-based, inclusive).
+
+    ``end`` is the true last line when known; ``render_end`` is where
+    rendering should stop (equal to ``end`` unless the span hit
+    ``_SPAN_MAX_LINES``, in which case ``truncated`` is ``"span-cap"``).
+    """
+
+    start: int
+    end: int
+    render_end: int
+    kind: str  # "function" | "class" ("value" reserved for future constants)
+    truncated: str = ""  # "" | "span-cap"
+
+    def to_dict(self) -> dict:
+        return {
+            "start": self.start,
+            "end": self.end,
+            "render_end": self.render_end,
+            "kind": self.kind,
+            "truncated": self.truncated,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SymbolSpan":
+        start = int(d.get("start", 1))
+        end = int(d.get("end", start))
+        return cls(
+            start=start,
+            end=end,
+            render_end=int(d.get("render_end", end)),
+            kind=str(d.get("kind", "function")),
+            truncated=str(d.get("truncated", "")),
+        )
+
+
+def _capped_span(start: int, end: int, kind: str) -> SymbolSpan:
+    if end - start + 1 > _SPAN_MAX_LINES:
+        return SymbolSpan(start, end, start + _SPAN_MAX_LINES - 1, kind, "span-cap")
+    return SymbolSpan(start, end, end, kind)
+
+
+def symbol_spans(content: str, file_path: str) -> dict[str, SymbolSpan]:
+    """Map top-level symbol name -> :class:`SymbolSpan` for one file.
+
+    v1 scope: top-level (module- or file-scope) functions and classes/types,
+    plus top-level arrow/function-valued ``const``/``let``/``var`` bindings.
+    Methods are not standalone keys; a class span covers its whole body.
+    Underscore-prefixed names are kept (Python-internal helpers are real
+    cross-file callees).
+    """
+    if not content.strip():
+        return {}
+    if file_path.endswith(".py"):
+        try:
+            return _python_symbol_spans(content)
+        except SyntaxError:
+            pass
+    return _heuristic_symbol_spans(content)
+
+
+def _python_symbol_spans(content: str) -> dict[str, SymbolSpan]:
+    tree = ast.parse(content)
+    spans: dict[str, SymbolSpan] = {}
+
+    def visit(nodes: list[ast.stmt]) -> None:
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                start = node.lineno
+                if node.decorator_list:
+                    start = min(start, min(d.lineno for d in node.decorator_list))
+                end = node.end_lineno or start
+                kind = "class" if isinstance(node, ast.ClassDef) else "function"
+                spans.setdefault(node.name, _capped_span(start, end, kind))
+            elif isinstance(node, (ast.If, ast.Try, ast.TryStar, ast.With)):
+                visit(getattr(node, "body", []))
+                for handler in getattr(node, "handlers", []):
+                    visit(handler.body)
+                visit(getattr(node, "orelse", []))
+                visit(getattr(node, "finalbody", []))
+
+    visit(tree.body)
+    return spans
+
+
+def _match_span_decl(line: str) -> tuple[str, str] | None:
+    """Return ``(name, kind)`` when ``line`` opens a top-level definition."""
+    m = _SPAN_DECL_RE.match(line)
+    if m:
+        keyword, name = m.group(1), m.group(2)
+        return name, ("function" if keyword in _FUNC_KINDS else "class")
+    m = _C_FUNC_RE.match(line)
+    if m:
+        return m.group(1), "function"
+    m = _VALUE_NAME_RE.match(line)
+    if m and ("=>" in line or "= function" in line or "= async" in line):
+        return m.group(1), "function"
+    return None
+
+
+def _heuristic_symbol_spans(content: str) -> dict[str, SymbolSpan]:
+    masked = mask_noncode(content)
+    lines = masked.splitlines()
+    offsets: list[int] = []
+    pos = 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
+
+    spans: dict[str, SymbolSpan] = {}
+    for i, line in enumerate(lines):
+        if not line or line[0] in " \t}":
+            continue
+        decl = _match_span_decl(line)
+        if decl is None:
+            continue
+        name, kind = decl
+        if name in spans:
+            continue
+        start = i + 1
+        end = _find_span_end(masked, lines, offsets, i)
+        if end is None:
+            # Unbalanced braces: true end unknown, stop at the cap.
+            capped = min(start + _SPAN_MAX_LINES - 1, len(lines))
+            spans[name] = SymbolSpan(start, capped, capped, kind, "span-cap")
+        else:
+            spans[name] = _capped_span(start, end, kind)
+    return spans
+
+
+def _find_span_end(
+    masked: str, lines: list[str], offsets: list[int], decl_idx: int
+) -> int | None:
+    """1-based end line of the definition opening at ``decl_idx`` (0-based).
+
+    Brace counting on the masked text when a ``{`` (or a top-level ``;``)
+    appears within ``_BRACE_SEARCH_LINES``; indentation fallback otherwise.
+    Returns ``None`` when braces never balance (true end unknown).
+    """
+    n = len(lines)
+    window_last = min(decl_idx + _BRACE_SEARCH_LINES, n) - 1
+    window_end = offsets[window_last] + len(lines[window_last])
+
+    depth = 0
+    brace_seen = False
+    i = offsets[decl_idx]
+    while i < len(masked):
+        c = masked[i]
+        if c == "{":
+            depth += 1
+            brace_seen = True
+        elif c == "}" and brace_seen:
+            depth -= 1
+            if depth <= 0:
+                return bisect.bisect_right(offsets, i)
+        elif c == ";" and not brace_seen:
+            return bisect.bisect_right(offsets, i)
+        elif c == "\n" and not brace_seen and i >= window_end:
+            return _indent_fallback_end(lines, decl_idx)
+        i += 1
+    if brace_seen:
+        return None
+    return _indent_fallback_end(lines, decl_idx)
+
+
+def _indent_fallback_end(lines: list[str], decl_idx: int) -> int:
+    """Span end for brace-less bodies: last line indented past the declaration."""
+    last_body = decl_idx
+    j = decl_idx + 1
+    while j < len(lines):
+        line = lines[j]
+        if line.strip():
+            if line[0] not in " \t":
+                # Ruby-style `end` closing a top-level body belongs to the span.
+                if line.strip() == "end":
+                    last_body = j
+                break
+            last_body = j
+        j += 1
+    return last_body + 1
 
 
 _DIRECTORY_OUTLINE_SUFFIXES = frozenset(

@@ -285,7 +285,7 @@ class TestEndToEndCleanExit:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         result = _run_audit_phases(
@@ -332,7 +332,7 @@ class TestEndToEndFailedRewind:
         monkeypatch.setattr("swival.audit._phase5_patch", fake_patch)
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         result = _run_audit_phases(
@@ -409,7 +409,7 @@ class TestEndToEndUnreviewedRewind:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         result = _run_audit_phases(
@@ -475,7 +475,7 @@ class TestEndToEndUndeepReviewedRewind:
         )
         monkeypatch.setattr(
             "swival.audit._phase5_report",
-            lambda vf, patch_fn, patch_text, ctx: "# report",
+            lambda vf, patch_fn, patch_text, state, ctx: "# report",
         )
 
         result = _run_audit_phases(

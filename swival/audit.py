@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import bisect
 import hashlib
 import json
 import queue
@@ -22,6 +21,15 @@ if TYPE_CHECKING:
 
 from . import fmt
 from .audit_ui import AuditUI, PhaseHandle
+from .tool_call_repair import _byte_capped_preview
+from .codeparse import (
+    mask_noncode,
+    strip_comments as _strip_comments,
+    redact_string_contents as _redact_string_contents,
+    string_literal_spans as _string_literal_spans,
+    starts_inside_string as _starts_inside_string,
+    is_zig_multiline_string_line as _is_zig_multiline_string_line,
+)
 
 # ---------------------------------------------------------------------------
 # Provenance
@@ -300,6 +308,8 @@ class AuditRunState:
     # `dependency_index` for new code; preserved as caller_index in saved state
     # for backward compatibility.
     caller_index: dict[str, list[str]] = field(default_factory=dict)
+    # path -> {symbol: serialized SymbolSpan dict} for top-level definitions.
+    symbol_spans_index: dict[str, dict[str, dict]] = field(default_factory=dict)
     attack_scores: dict[str, int] = field(default_factory=dict)
     artifact_dir: Path = field(default_factory=lambda: Path("audit-findings"))
     state_dir: Path = field(default_factory=lambda: Path(".swival/audit"))
@@ -318,6 +328,12 @@ class AuditRunState:
     # Each entry: {"title", "severity", "source_file", "reason"}. Kept so the
     # README totals can explain why verified and written counts differ.
     adjudication_discarded: list[dict] = field(default_factory=list)
+    # In-memory HEAD content cache (path -> content), never persisted. HEAD
+    # is fixed for the run, so entries never invalidate; concurrent duplicate
+    # fills from worker threads are idempotent dict writes.
+    _content_cache: dict[str, str] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     @property
     def dependency_index(self) -> dict[str, list[str]]:
@@ -353,6 +369,7 @@ class AuditRunState:
             "repo_profile": self.repo_profile,
             "import_index": self.import_index,
             "caller_index": self.caller_index,
+            "symbol_spans_index": self.symbol_spans_index,
             "attack_scores": self.attack_scores,
             "verification_state": self.verification_state,
             "artifact_state": self.artifact_state,
@@ -406,6 +423,7 @@ class AuditRunState:
             repo_profile=blob.get("repo_profile"),
             import_index=blob.get("import_index", {}),
             caller_index=blob.get("caller_index", {}),
+            symbol_spans_index=blob.get("symbol_spans_index", {}),
             attack_scores=blob.get("attack_scores", {}),
             verification_state=blob.get("verification_state", {}),
             artifact_state=blob["artifact_state"],
@@ -640,168 +658,10 @@ _EXPORT_RE = re.compile(
 )
 
 
-# JS/TS regex literal: `/pattern/flags`. Treated as an opaque span so
-# `import`/`require` text inside the pattern isn't picked up.
-#
-# Two arms separate strong context from weak context:
-#
-# * Strong context — start of input, right after `\n`, after the punctuation
-#   set `=([{,;:?!&|^`, after `=>`, or after a JS keyword that introduces an
-#   expression (`return`, `typeof`). A `/` in these positions is
-#   unambiguously a regex literal, so the pattern may begin with whitespace
-#   and any whitespace between the operator/keyword and `/` is consumed.
-# * Weak context — whitespace alone, or after an arithmetic operator
-#   (`+`, `-`, `*`, `/`, `%`, `~`, `<`, `>`). The `/` is ambiguous (it could
-#   be division), so the `(?!\s)` lookahead rejects patterns starting with
-#   whitespace, which is the shape division-with-call-between-slashes takes
-#   (`a / require('x') / b`).
-# `(?!\*)` after `/` keeps `/* ... */` block comments from being mis-tokenized
-# as a regex starting with `*`. Regex patterns that legitimately begin with
-# `*` are vanishingly rare and accepted as a known gap.
-_REGEX_BODY = r"/(?!\*)(?:[^/\\\n]|\\.)+/[gimsuyd]*"
-# JS expression-introducing keywords that may precede a regex literal. For
-# each, two fixed-width lookbehinds are emitted: `(?<=[^\w.]KEYWORD)` for the
-# common case (keyword preceded by whitespace or punctuation other than `.`)
-# and `(?<=^KEYWORD)` for the start-of-input case. The explicit `[^\w.]`
-# rejects the dot, so member-access shapes like `obj.return /x/` fall
-# through to weak-context handling and don't mask later real imports.
-_JS_REGEX_KEYWORDS: tuple[str, ...] = (
-    "in",
-    "new",
-    "void",
-    "case",
-    "else",
-    "throw",
-    "yield",
-    "await",
-    "return",
-    "typeof",
-    "delete",
-    "instanceof",
-)
-_KEYWORD_LOOKBEHINDS = "|".join(
-    f"(?<=[^\\w.]{kw})|(?<=^{kw})" for kw in _JS_REGEX_KEYWORDS
-)
-
-# `]` lives in the weak set even though it can syntactically precede a
-# regex literal. In real JS, division after an array/property index
-# (`arr[i] / arr[j]`) is overwhelmingly more common than a regex literal
-# starting with whitespace after `]`. The weak arm's `(?!\s)` still allows
-# non-ws regex like `arr[i] /foo/g` to be tokenized correctly.
-_REGEX_LITERAL_RE = (
-    r"(?:"
-    r"(?:"
-    r"(?<=\n)|(?<=^)|"
-    r"(?<=[=(,;:?!&|^\[{}])|"
-    r"(?<==>)|"
-    + _KEYWORD_LOOKBEHINDS
-    + r")\s*"
-    + _REGEX_BODY
-    + r"|(?<=[\s+\-*/%~<>\]])/(?!\s)(?!\*)(?:[^/\\\n]|\\.)+/[gimsuyd]*"
-    r")"
-)
-
-# Opaque-span tokens: triple/single/double/backtick string literals plus the
-# JS regex literal. Shared by `_STRING_LITERAL_RE` (span detection) and
-# `_STRIP_TOKEN_RE` (comment stripping), so both stay in sync.
-_OPAQUE_SPAN_PATTERN = (
-    r'"""[\s\S]*?"""'
-    r"|'''[\s\S]*?'''"
-    r'|"(?:[^"\\]|\\.)*"'
-    r"|'(?:[^'\\]|\\.)*'"
-    r"|`(?:[^`\\]|\\.)*`"
-)
-
-_STRING_LITERAL_RE = re.compile(_OPAQUE_SPAN_PATTERN + r"|" + _REGEX_LITERAL_RE)
-
-# Block/line comments are listed before the regex literal so `/* ... */` and
-# `// ...` are tried first and never mis-tokenized as `/.../`.
-_STRIP_TOKEN_RE = re.compile(
-    _OPAQUE_SPAN_PATTERN + r"|/\*[\s\S]*?\*/" + r"|//[^\n]*" + r"|" + _REGEX_LITERAL_RE
-)
-
-
-def _strip_comments(content: str) -> str:
-    """Remove ``/* ... */`` block comments and ``// ...`` line comments while
-    keeping the contents of string literals untouched.
-
-    Run before regex-based import/export extraction so commented-out
-    declarations (e.g. ``// require('fake')`` or ``/* class Fake {} */``)
-    do not pollute the indices. The matcher consumes string literals first
-    so markers that happen to appear inside ``"..."``, ``'...'``, or
-    backtick strings are kept verbatim. ``#`` is intentionally not stripped
-    because it carries semantic weight in C/C++ (``#include``, ``#define``).
-    """
-
-    def repl(m: re.Match) -> str:
-        text = m.group(0)
-        if text.startswith("/*") or text.startswith("//"):
-            return ""
-        return text
-
-    return _STRIP_TOKEN_RE.sub(repl, content)
-
-
-def _redact_string_contents(content: str) -> str:
-    """Return ``content`` with the interior of every string literal replaced
-    by spaces (newlines preserved, delimiters kept), so position-based
-    secondary scans can ignore code-shaped text trapped inside string
-    literals while leaving byte offsets stable.
-    """
-
-    def repl(m: re.Match) -> str:
-        s = m.group(0)
-        if s.startswith(('"""', "'''")) and len(s) >= 6:
-            delim = s[:3]
-            inner = s[3:-3]
-            return delim + "".join(c if c == "\n" else " " for c in inner) + delim
-        if len(s) < 2:
-            return s
-        inner = s[1:-1]
-        redacted = "".join(c if c == "\n" else " " for c in inner)
-        return s[0] + redacted + s[-1]
-
-    return _STRING_LITERAL_RE.sub(repl, content)
-
-
 _PYTHON_FROM_DOT_IMPORT_RE = re.compile(
     r"^\s*from\s+(\.+)\s+import\s+([^\n#]+)",
     re.MULTILINE,
 )
-
-
-def _string_literal_spans(
-    content: str,
-) -> tuple[list[int], list[int]]:
-    """Return parallel ``(starts, ends)`` lists for every opaque span in
-    ``content``, sorted by start position (the natural ``re.finditer`` order).
-    Kept as two lists so :func:`_starts_inside_string` can binary-search."""
-    starts: list[int] = []
-    ends: list[int] = []
-    for m in _STRING_LITERAL_RE.finditer(content):
-        starts.append(m.start())
-        ends.append(m.end())
-    return starts, ends
-
-
-def _starts_inside_string(pos: int, spans: tuple[list[int], list[int]]) -> bool:
-    starts, ends = spans
-    idx = bisect.bisect_right(starts, pos) - 1
-    if idx < 0:
-        return False
-    return starts[idx] < pos < ends[idx] - 1
-
-
-def _is_zig_multiline_string_line(content: str, pos: int) -> bool:
-    """Return True when ``pos`` falls on a Zig multiline-string literal line.
-
-    Zig has no block comments; instead each line of a multiline string starts
-    with ``\\\\``. A match landing on such a line is part of string content,
-    not code.
-    """
-    line_start = content.rfind("\n", 0, pos) + 1
-    prefix = content[line_start:pos].lstrip()
-    return prefix.startswith("\\\\")
 
 
 def _extract_imports(content: str) -> list[str]:
@@ -972,6 +832,39 @@ def _load_file_contents(files: list[str], base_dir: str) -> dict[str, str]:
     return cache
 
 
+def _cached_git_show(path: str, state: AuditRunState, base_dir: str) -> str:
+    """``_git_show`` through the run-scoped content cache.
+
+    HEAD is fixed for the run, so a hit never goes stale. Raises
+    ``RuntimeError`` like ``_git_show`` when the path is unreadable.
+    """
+    cached = state._content_cache.get(path)
+    if cached is not None:
+        return cached
+    content = _git_show(path, base_dir)
+    state._content_cache[path] = content
+    return content
+
+
+def _ensure_symbol_spans_index(state: AuditRunState, base_dir: str) -> None:
+    """Post-load repair for state files that predate ``symbol_spans_index``.
+
+    ``AuditRunState.load()`` is pure JSON deserialization and cannot shell
+    out; the rebuild lives here in the runner where ``base_dir`` is in hand.
+    Deterministic: the run is pinned to ``scope.commit``.
+    """
+    if state.symbol_spans_index:
+        return
+    content_cache = _load_file_contents(state.scope.mandatory_files, base_dir)
+    state._content_cache.update(content_cache)
+    index = _build_symbol_spans_index(state.scope.mandatory_files, content_cache)
+    index, dropped = _cap_symbol_spans_index(index, state.caller_index)
+    state.symbol_spans_index = index
+    if dropped:
+        fmt.info(f"symbol span index capped: dropped {dropped} unreferenced file(s)")
+    state.save()
+
+
 def _repo_profile_json(state: AuditRunState) -> str:
     if state.repo_profile is None:
         return "{}"
@@ -1076,10 +969,51 @@ def _expand_import_candidates(base: str) -> list[str]:
     return candidates
 
 
+_SYMBOL_SPANS_MAX_SYMBOLS = 50_000
+
+
+def _build_symbol_spans_index(
+    files: list[str],
+    content_cache: dict[str, str],
+) -> dict[str, dict[str, dict]]:
+    """path -> {symbol: serialized SymbolSpan dict} for top-level definitions."""
+    from .outline import symbol_spans
+
+    index: dict[str, dict[str, dict]] = {}
+    for f in files:
+        content = content_cache.get(f)
+        if content is None:
+            continue
+        spans = symbol_spans(content, f)
+        if spans:
+            index[f] = {name: span.to_dict() for name, span in spans.items()}
+    return index
+
+
+def _cap_symbol_spans_index(
+    index: dict[str, dict[str, dict]],
+    dependency_index: dict[str, list[str]],
+) -> tuple[dict[str, dict[str, dict]], int]:
+    """Bound the span index on pathological repos.
+
+    Over ``_SYMBOL_SPANS_MAX_SYMBOLS`` total symbols, keep only files that
+    appear in someone's dependency edge (the only files callee resolution can
+    ever consult). Returns ``(index, dropped_file_count)``.
+    """
+    total = sum(len(v) for v in index.values())
+    if total <= _SYMBOL_SPANS_MAX_SYMBOLS:
+        return index, 0
+    referenced: set[str] = set()
+    for deps in dependency_index.values():
+        referenced.update(deps)
+    capped = {f: v for f, v in index.items() if f in referenced}
+    return capped, len(index) - len(capped)
+
+
 def _build_context_indices(
     files: list[str],
     content_cache: dict[str, str],
-) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, dict[str, dict]]]:
     import posixpath
 
     import_index: dict[str, list[str]] = {}
@@ -1130,7 +1064,367 @@ def _build_context_indices(
         if callers:
             caller_index[f] = sorted(callers)
 
-    return import_index, caller_index
+    symbol_spans_index = _build_symbol_spans_index(files, content_cache)
+    symbol_spans_index, dropped = _cap_symbol_spans_index(
+        symbol_spans_index, caller_index
+    )
+    if dropped:
+        _ui_info(
+            None,
+            f"symbol span index capped at {_SYMBOL_SPANS_MAX_SYMBOLS} symbols: "
+            f"dropped {dropped} file(s) not referenced by any dependency edge",
+        )
+
+    return import_index, caller_index, symbol_spans_index
+
+
+# ---------------------------------------------------------------------------
+# Cross-file callee context
+# ---------------------------------------------------------------------------
+
+_CALLEE_BODY_CAP = 8_000
+_CALLEE_BUNDLE_CAP = 24_000
+# Maximum same-tier definitions inlined for one name; beyond this the name is
+# dropped as too ambiguous and listed in the omission note.
+_CALLEE_MAX_DEFS = 2
+
+_CALLEE_SECTION_HEADER = (
+    "Called function definitions (cross-file, exact committed bodies):"
+)
+
+# Sentinel rendered into the prompt when no callee resolves; callers compare
+# against it to decide whether a section is worth appending at all.
+_CALLEE_NONE = "(none)"
+
+# One-line orientation for prompts whose evidence carries a callee section.
+# Kept terse: it is a per-call token tax.
+_CALLEE_PROMPT_NOTE = (
+    '"Called function definitions" are best-effort exact committed bodies of '
+    "cross-file functions the primary file calls; not every callee is "
+    "resolved. Their line numbers refer to their own files and may be cited "
+    "in location fields."
+)
+
+_CALL_SITE_RE = re.compile(r"\b(\w+)\s*\(")
+
+# Control-flow and declaration keywords that read as `name(` but are never
+# cross-file callees. Resolution against the dependency set would drop most
+# of them anyway; the stoplist avoids dictionary churn on hot keywords.
+_CALL_SITE_STOPLIST = frozenset(
+    {
+        "if",
+        "elif",
+        "else",
+        "for",
+        "while",
+        "switch",
+        "match",
+        "case",
+        "return",
+        "catch",
+        "except",
+        "with",
+        "do",
+        "until",
+        "unless",
+        "def",
+        "fn",
+        "func",
+        "function",
+        "lambda",
+        "class",
+        "struct",
+        "enum",
+        "union",
+        "impl",
+        "trait",
+        "interface",
+        "sizeof",
+        "typeof",
+        "alignof",
+        "new",
+        "delete",
+        "not",
+        "and",
+        "or",
+        "in",
+        "is",
+        "yield",
+        "await",
+        "assert",
+        "raise",
+        "throw",
+        "defer",
+        "go",
+        "select",
+        "loop",
+        "foreach",
+    }
+)
+
+
+def _call_sites(content: str) -> dict[str, list[int]]:
+    """Map called-name -> call-site line numbers (1-based, in order).
+
+    Operates on ``mask_noncode(content)`` so names inside strings, comments,
+    and regex literals are excluded and line numbers stay exact. Dotted and
+    arrow paths yield their trailing segment (``obj.parse_token(`` ->
+    ``parse_token``). Deliberately dumb: precision comes from resolution
+    against the dependency set, not from the scanner.
+    """
+    masked = mask_noncode(content)
+    sites: dict[str, list[int]] = {}
+    line = 1
+    last = 0
+    for m in _CALL_SITE_RE.finditer(masked):
+        name = m.group(1)
+        if name in _CALL_SITE_STOPLIST or name[0].isdigit():
+            continue
+        line += masked.count("\n", last, m.start(1))
+        last = m.start(1)
+        lines = sites.setdefault(name, [])
+        if not lines or lines[-1] != line:
+            lines.append(line)
+    return sites
+
+
+def _tier1_import_files(path: str, state: AuditRunState) -> list[str]:
+    """Files reached through explicit, resolvable import statements of ``path``.
+
+    These are the high-confidence dependency edges the author wrote down:
+    exact tracked paths, relative imports (JS/TS, Zig, Python leading-dot),
+    and dotted Python module paths mapped onto the tree. Order-preserving
+    and deduplicated.
+    """
+    import posixpath
+
+    file_set = set(state.scope.mandatory_files)
+    ext = posixpath.splitext(path)[1]
+    directory = posixpath.dirname(path)
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(candidate: str) -> None:
+        if candidate != path and candidate not in seen and candidate in file_set:
+            seen.add(candidate)
+            out.append(candidate)
+
+    for imp in state.import_index.get(path, ()):
+        if imp in file_set:
+            _add(imp)
+            continue
+        resolved = _resolve_relative_import(
+            path, imp, file_set, importer_ext=ext, importer_dir=directory
+        )
+        if resolved is not None:
+            _add(resolved)
+            continue
+        # Dotted (or bare) module name: try it as a tree path. Covers Python
+        # absolute imports (`from pkg.mod import f` -> pkg/mod.py).
+        if "/" not in imp and not imp.startswith("."):
+            base = imp.replace(".", "/")
+            _add(f"{base}.py")
+            _add(f"{base}/__init__.py")
+    return out
+
+
+def _format_call_sites(calls: dict[str, list[int]], paths: list[str]) -> str:
+    """Render call-site lines, per file when more than one primary calls it."""
+    multi = len(calls) > 1
+    rendered: list[str] = []
+    for path in paths:
+        lines = calls.get(path)
+        if not lines:
+            continue
+        more = f", +{len(lines) - 5} more" if len(lines) > 5 else ""
+        if multi:
+            shown = ",".join(str(n) for n in lines[:5])
+            rendered.append(f"{path}:{shown}{more}")
+        else:
+            shown = ", ".join(str(n) for n in lines[:5])
+            rendered.append(f"lines {shown}{more}")
+    return "; ".join(rendered)
+
+
+def _render_callee_block(
+    cand: dict,
+    paths: list[str],
+    state: AuditRunState,
+    ctx: InputContext,
+    lines_cache: dict[str, list[str]],
+) -> str | None:
+    """One delimited callee block, or None when the source is unreadable.
+
+    ``lines_cache`` memoizes split dependency files across the blocks of one
+    gathering pass, so a file contributing several callees splits once.
+    """
+    src_lines = lines_cache.get(cand["def_path"])
+    if src_lines is None:
+        try:
+            content = _cached_git_show(cand["def_path"], state, ctx.base_dir)
+        except RuntimeError:
+            return None
+        src_lines = lines_cache[cand["def_path"]] = content.splitlines()
+    span = cand["span"]
+    start = max(1, span.start)
+    render_end = min(span.render_end, len(src_lines))
+    body = "\n".join(src_lines[start - 1 : render_end])
+    notes: list[str] = []
+    capped = _byte_capped_preview(body, _CALLEE_BODY_CAP)
+    if len(capped) < len(body):
+        body = capped
+        notes.append(
+            f"[truncated at {_CALLEE_BODY_CAP} bytes; full definition at "
+            f"{cand['def_path']}:{start}-{span.end}]"
+        )
+    elif span.truncated == "span-cap":
+        notes.append(
+            f"[truncated: span cap; definition continues past "
+            f"{cand['def_path']}:{render_end}]"
+        )
+    header = (
+        f"--- {cand['name']} ({cand['def_path']}:{start}-{span.end}, "
+        f"called at {_format_call_sites(cand['calls'], paths)}) ---"
+    )
+    block = f"{header}\n{body}"
+    if notes:
+        block += "\n" + "\n".join(notes)
+    return block
+
+
+def _gather_callee_context_for_paths(
+    paths: list[str],
+    contents: dict[str, str],
+    state: AuditRunState,
+    ctx: InputContext,
+    exclude_files: set[str] | frozenset[str] = frozenset(),
+) -> str:
+    """Cross-file callee definitions for a bundle of primary files.
+
+    Resolution per primary file, in two tiers: explicit resolved imports
+    first, the broader ``dependency_index`` only for names tier 1 left
+    unresolved. Within the winning tier a name defined in more than
+    ``_CALLEE_MAX_DEFS`` files is dropped as too ambiguous. Names defined in
+    the primary itself, or in a file already present in the bundle
+    (``exclude_files`` plus ``paths``), are skipped.
+
+    One ``_CALLEE_BUNDLE_CAP`` byte budget covers the whole returned section.
+    Admission priority: triage ``relevant_symbols`` first, then call count,
+    then first-call-site order; rendering stays in first-call-site order and
+    over-budget callees degrade to one-line entries. Returns
+    ``_CALLEE_NONE`` when nothing resolves.
+    """
+    from .outline import SymbolSpan
+
+    bundle_files = set(exclude_files) | set(paths)
+    candidates: dict[tuple[str, str], dict] = {}
+    ambiguous: set[str] = set()
+
+    for path_idx, path in enumerate(paths):
+        content = contents.get(path)
+        if content is None:
+            continue
+        sites = _call_sites(content)
+        if not sites:
+            continue
+        own = set(state.symbol_spans_index.get(path, ()))
+        tier1 = _tier1_import_files(path, state)
+        tier1_set = set(tier1)
+        tier2 = [f for f in state.dependency_index.get(path, []) if f not in tier1_set]
+        resolved: set[str] = set()
+        for tier_files in (tier1, tier2):
+            hits: dict[str, list[str]] = {}
+            for dep in tier_files:
+                if dep in bundle_files:
+                    continue
+                dep_spans = state.symbol_spans_index.get(dep)
+                if not dep_spans:
+                    continue
+                for name in sites.keys() & dep_spans.keys():
+                    if name in own or name in resolved:
+                        continue
+                    hits.setdefault(name, []).append(dep)
+            for name, def_files in sorted(hits.items()):
+                resolved.add(name)
+                if len(def_files) > _CALLEE_MAX_DEFS:
+                    ambiguous.add(name)
+                    continue
+                for dep in def_files:
+                    key = (name, dep)
+                    cand = candidates.get(key)
+                    if cand is None:
+                        cand = candidates[key] = {
+                            "name": name,
+                            "def_path": dep,
+                            "span": SymbolSpan.from_dict(
+                                state.symbol_spans_index[dep][name]
+                            ),
+                            "calls": {},
+                            "order": (path_idx, sites[name][0]),
+                        }
+                    cand["calls"][path] = sites[name]
+
+    if not candidates and not ambiguous:
+        return _CALLEE_NONE
+
+    relevant: set[str] = set()
+    for path in paths:
+        rec = state.triage_records.get(path)
+        if rec is not None:
+            relevant.update(rec.relevant_symbols)
+
+    def _admission_key(cand: dict) -> tuple:
+        total_calls = sum(len(v) for v in cand["calls"].values())
+        return (0 if cand["name"] in relevant else 1, -total_calls, cand["order"])
+
+    budget = _CALLEE_BUNDLE_CAP
+    rendered: dict[tuple[str, str], str] = {}
+    unreadable: set[tuple[str, str]] = set()
+    lines_cache: dict[str, list[str]] = {}
+    for cand in sorted(candidates.values(), key=_admission_key):
+        key = (cand["name"], cand["def_path"])
+        block = _render_callee_block(cand, paths, state, ctx, lines_cache)
+        if block is None:
+            unreadable.add(key)
+            continue
+        block_bytes = len(block.encode("utf-8"))
+        if block_bytes <= budget:
+            budget -= block_bytes
+            rendered[key] = block
+
+    parts: list[str] = []
+    omitted_lines: list[str] = []
+    for cand in sorted(candidates.values(), key=lambda c: c["order"]):
+        key = (cand["name"], cand["def_path"])
+        if key in unreadable:
+            continue
+        block = rendered.get(key)
+        if block is not None:
+            parts.append(block)
+        else:
+            span = cand["span"]
+            omitted_lines.append(
+                f"{cand['name']} ({cand['def_path']}:{span.start}-{span.end}) "
+                f"[omitted: bundle budget]"
+            )
+    if omitted_lines:
+        parts.append("\n".join(omitted_lines))
+    if ambiguous:
+        parts.append("(ambiguous, not shown: " + ", ".join(sorted(ambiguous)) + ")")
+    return "\n\n".join(parts) if parts else _CALLEE_NONE
+
+
+def _gather_callee_context(
+    path: str,
+    content: str,
+    state: AuditRunState,
+    ctx: InputContext,
+    exclude_files: set[str] | frozenset[str] = frozenset(),
+) -> str:
+    """Single-primary wrapper over :func:`_gather_callee_context_for_paths`."""
+    return _gather_callee_context_for_paths(
+        [path], {path: content}, state, ctx, exclude_files
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2008,6 +2302,7 @@ Reject any claim that is not fully proven.
 
 You have no tools, no shell access, and no ability to run commands.
 All the source code you need is included below. Do not request additional information.
+{_CALLEE_PROMPT_NOTE}
 
 Output format: either one or more `@@ finding @@` blocks (described below), OR the single line `@@ none @@` if no in-scope finding exists. No other output shape is valid. If you emit any `@@ finding @@` block, do NOT also emit `@@ none @@` — the sentinel is only for the zero-findings case.
 
@@ -2183,6 +2478,7 @@ You are expanding one security finding with proof details.
 
 You have no tools, no shell access, and no ability to run commands.
 All the source code you need is included below. Do not request additional information.
+{_CALLEE_PROMPT_NOTE}
 
 Output format: exactly one `@@ expansion @@` block — never two, never a copy of the worked example below followed by your own. The block has these keys, one per line:
 - type: one of {", ".join(_PHASE3B_TYPE_VALUES)} - pick the security impact label, never a generic-correctness label
@@ -2293,7 +2589,8 @@ Rules:
   REPRODUCED
   NOTREPRODUCED"""
 
-_PHASE45_REVIEW_SYSTEM = """\
+_PHASE45_REVIEW_SYSTEM = (
+    """\
 You are adjudicating one already-reproduced security finding. A prior phase built a proof-of-concept and accepted it. Your job is the opposite of that phase: try to REFUTE this finding. Default to false_positive unless the evidence forces otherwise. We would rather drop a real bug than ship a false positive.
 
 {lens}
@@ -2325,6 +2622,12 @@ Output exactly one `@@ verdict @@` block with these keys, one per line:
 - reason: one line under 25 words
 
 Use exactly the keys shown. Do not quote, escape, or wrap values."""
+    + (
+        # Concatenated rather than embedded: the template literal goes through
+        # .format(lens=...), where literal braces would be hazardous.
+        "\n\n" + _CALLEE_PROMPT_NOTE
+    )
+)
 
 _PHASE45_LENSES = (
     "Lens: reachability. Concentrate on whether an untrusted actor can actually reach this code path under realistic deployment. If the only path runs through trusted, admin, or self-invoked code, it is a false_positive.",
@@ -2946,33 +3249,27 @@ def _phase3a_inventory(
     state: AuditRunState,
     ctx: InputContext,
     content: str,
+    callee_context: str | None = None,
 ) -> list[dict]:
-    """Phase 3a: compact finding inventory for one file."""
+    """Phase 3a: compact finding inventory for one file.
+
+    ``callee_context`` lets the per-file driver compute the callee section
+    once and share it with the 3b expansion calls.
+    """
     triage = state.triage_records.get(path)
     bug_classes = ", ".join(triage.bug_classes) if triage else "all"
 
-    related_parts = []
-    for imp_file in (state.import_index.get(path, []))[:5]:
-        for tf in state.scope.tracked_files:
-            if imp_file in tf:
-                try:
-                    related_parts.append(
-                        f"--- {tf} ---\n{_git_show(tf, ctx.base_dir)[:3000]}"
-                    )
-                except RuntimeError:
-                    pass
-                break
-
     profile_json = _repo_profile_json(state)
     triage_json = json.dumps(asdict(triage), indent=2) if triage else "{}"
-    related = "\n\n".join(related_parts) if related_parts else "(none)"
+    if callee_context is None:
+        callee_context = _gather_callee_context(path, content, state, ctx)
 
     suffix = (
         f"Focus bug classes: {bug_classes}\n\n"
         f"Repository profile:\n{profile_json}\n\n"
         f"Phase 2 triage result:\n{triage_json}\n\n"
         f"Committed evidence bundle:\n{content}\n\n"
-        f"Related context:\n{related}\n\n"
+        f"{_CALLEE_SECTION_HEADER}\n{callee_context}\n\n"
         f"Primary file: {path}"
     )
     messages = [
@@ -2991,12 +3288,20 @@ def _phase3a_inventory(
 
 def _phase3b_expand_one(
     item: tuple[dict, str, str, AuditRunState, InputContext],
+    callee_context: str | None = None,
 ) -> dict | None:
-    """Phase 3b: expand one inventory finding with proof details."""
+    """Phase 3b: expand one inventory finding with proof details.
+
+    ``callee_context`` lets the per-file driver compute the callee section
+    once and share it across all of a file's expansion calls.
+    """
     finding_stub, path, content, state, ctx = item
 
+    if callee_context is None:
+        callee_context = _gather_callee_context(path, content, state, ctx)
     suffix = (
         f"Committed evidence for {path}:\n{content}\n\n"
+        f"{_CALLEE_SECTION_HEADER}\n{callee_context}\n\n"
         f"Finding to expand:\n"
         f"  Title: {finding_stub.get('title', '')}\n"
         f"  Severity: {finding_stub.get('severity', '')}\n"
@@ -3078,7 +3383,12 @@ def _phase3_deep_review(
     except RuntimeError:
         return []
 
-    inventory = _phase3a_inventory(path, state, ctx, content)
+    # Computed once per file: 3a and every 3b expansion share the same
+    # primary content, so the callee section is identical across them.
+    callee_context = _gather_callee_context(path, content, state, ctx)
+    inventory = _phase3a_inventory(
+        path, state, ctx, content, callee_context=callee_context
+    )
     if not inventory:
         return []
 
@@ -3086,7 +3396,7 @@ def _phase3_deep_review(
     expansions = []
     for item in expansion_items:
         try:
-            expansions.append(_phase3b_expand_one(item))
+            expansions.append(_phase3b_expand_one(item, callee_context=callee_context))
         except Exception as e:
             _ui_warning(ui, f"expansion failed for {path}: {e}")
             expansions.append(None)
@@ -3143,27 +3453,31 @@ def _deep_review_one(
             return DeepReviewResult(path=path, error=str(e2))
 
 
-def _gather_evidence(finding: FindingRecord, ctx: InputContext) -> tuple[str, int]:
-    """Collect committed file contents for all locations referenced by a finding."""
-    seen = set()
+def _gather_evidence(
+    finding: FindingRecord, state: AuditRunState, ctx: InputContext
+) -> tuple[str, int]:
+    """Collect committed file contents for all locations referenced by a finding.
+
+    Appends one merged cross-file callee section covering every evidence
+    file, under a single bundle budget; files already in the bundle never
+    reappear as callee blocks.
+    """
+    contents: dict[str, str] = {}
+    paths: list[str] = []
     parts = []
-    for loc in finding.locations:
-        fpath = loc.split(":")[0]
-        if fpath in seen:
+    for fpath in _evidence_file_paths(finding):
+        try:
+            content = _cached_git_show(fpath, state, ctx.base_dir)
+        except RuntimeError:
             continue
-        seen.add(fpath)
-        try:
-            content = _git_show(fpath, ctx.base_dir)
-            parts.append(f"--- {fpath} ---\n{content}")
-        except RuntimeError:
-            pass
-    if finding.source_file not in seen:
-        try:
-            content = _git_show(finding.source_file, ctx.base_dir)
-            parts.append(f"--- {finding.source_file} ---\n{content}")
-        except RuntimeError:
-            pass
+        contents[fpath] = content
+        paths.append(fpath)
+        parts.append(f"--- {fpath} ---\n{content}")
     text = "\n\n".join(parts) if parts else "(no evidence available)"
+    if paths:
+        callee_context = _gather_callee_context_for_paths(paths, contents, state, ctx)
+        if callee_context != _CALLEE_NONE:
+            text += f"\n\n{_CALLEE_SECTION_HEADER}\n{callee_context}"
     return text, len(parts)
 
 
@@ -3199,7 +3513,7 @@ def _phase4c_reproduce(
     finding_json = json.dumps(asdict(finding), indent=2)
     locs = ", ".join(finding.locations) if finding.locations else finding.source_file
     _ui_info(ui, f"    verifier [{locs}]: collecting evidence for {finding.title}")
-    evidence, n_files = _gather_evidence(finding, ctx)
+    evidence, n_files = _gather_evidence(finding, state, ctx)
     _ui_info(ui, f"    verifier [{locs}]: gathered {n_files} evidence file(s)")
 
     _ui_info(ui, f"    verifier [{locs}]: preparing isolated worktree")
@@ -3285,7 +3599,7 @@ def _phase5_patch(
     from .agent import run_agent_loop
 
     finding_json = json.dumps(asdict(vf.finding), indent=2)
-    evidence, n_files = _gather_evidence(vf.finding, ctx)
+    evidence, n_files = _gather_evidence(vf.finding, state, ctx)
 
     work_dir = Path(ctx.base_dir) / state.state_dir / state.run_id / "patch-gen"
     try:
@@ -3359,12 +3673,13 @@ def _phase5_report(
     vf: VerifiedFinding,
     patch_filename: str,
     patch_text: str,
+    state: AuditRunState,
     ctx: InputContext,
 ) -> str:
     """Generate the markdown report."""
     finding_json = json.dumps(asdict(vf.finding), indent=2)
     reproducer_json = json.dumps(vf.reproducer, indent=2) if vf.reproducer else "{}"
-    evidence, _n = _gather_evidence(vf.finding, ctx)
+    evidence, _n = _gather_evidence(vf.finding, state, ctx)
 
     system = _PHASE5_REPORT_TEMPLATE.format(provenance_url=AUDIT_PROVENANCE_URL)
     suffix = (
@@ -3725,7 +4040,7 @@ def _adjudicate_one(
     reproducer_summary = str(vf.reproducer.get("summary", "")) if vf.reproducer else ""
 
     try:
-        evidence, _n = _gather_evidence(finding, ctx)
+        evidence, _n = _gather_evidence(finding, state, ctx)
     except Exception as e:
         return AdjudicationResult(
             index=index,
@@ -4664,9 +4979,12 @@ def _run_pipeline_body(
         ph1.advance(current="building import/caller indices")
         if not ui.is_live:
             fmt.info("phase 1: building import/caller indices...")
-        state.import_index, state.caller_index = _build_context_indices(
-            state.scope.mandatory_files, content_cache
-        )
+        (
+            state.import_index,
+            state.caller_index,
+            state.symbol_spans_index,
+        ) = _build_context_indices(state.scope.mandatory_files, content_cache)
+        state._content_cache.update(content_cache)
         ph1.advance(current="ordering by attack surface")
         if not ui.is_live:
             fmt.info("phase 1: ordering by attack surface...")
@@ -5195,7 +5513,7 @@ def _run_pipeline_body(
                     fmt.info(f"  [{fi}/{total}] generating report...")
                 try:
                     report_text = _phase5_report(
-                        vf, patch_filename, patch_result.patch_text, ctx
+                        vf, patch_filename, patch_result.patch_text, state, ctx
                     )
                 except Exception as e:
                     _mark_artifact_failed(
@@ -5358,6 +5676,7 @@ def _run_audit_phases(
                 f"{'measure-triage' if measure_triage else 'normal'}. "
                 f"Start a fresh run instead of resuming."
             )
+        _ensure_symbol_spans_index(state, base_dir)
         if regen:
             if not state.verified_findings:
                 return "error: no verified findings to regenerate artifacts for."
