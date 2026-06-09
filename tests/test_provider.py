@@ -3647,6 +3647,108 @@ class TestOrphanedToolCallsStripsReasoning:
         assert asst["reasoning_content"] == "I will call f and g"
 
 
+class TestCompleteOrphanedToolCalls:
+    """Backfill placeholder results for interrupted/cancelled tool calls."""
+
+    def test_interrupt_with_no_results_backfills_all(self):
+        from swival._msg import _complete_orphaned_tool_calls
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tooluse_a",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    },
+                    {
+                        "id": "tooluse_b",
+                        "type": "function",
+                        "function": {"name": "g", "arguments": "{}"},
+                    },
+                ],
+            },
+        ]
+        inserted = _complete_orphaned_tool_calls(messages, content="error: cut short")
+        assert inserted == 2
+        results = [m for m in messages if m.get("role") == "tool"]
+        assert [r["tool_call_id"] for r in results] == ["tooluse_a", "tooluse_b"]
+        assert all(r["content"] == "error: cut short" for r in results)
+        # Placeholders sit immediately after the assistant message.
+        assert messages[2]["role"] == "tool"
+        assert messages[3]["role"] == "tool"
+
+    def test_partial_results_backfills_only_missing(self):
+        from swival._msg import _complete_orphaned_tool_calls
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    },
+                    {
+                        "id": "tc2",
+                        "type": "function",
+                        "function": {"name": "g", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "real result"},
+        ]
+        inserted = _complete_orphaned_tool_calls(messages, content="error: cut short")
+        assert inserted == 1
+        # New placeholder lands right after the existing tc1 result.
+        assert messages[3]["tool_call_id"] == "tc2"
+        assert messages[3]["content"] == "error: cut short"
+        # The real result is untouched.
+        assert messages[2]["content"] == "real result"
+
+    def test_fully_satisfied_is_noop(self):
+        from swival._msg import _complete_orphaned_tool_calls
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "done"},
+            {"role": "assistant", "content": "final answer"},
+        ]
+        before = [dict(m) for m in messages]
+        inserted = _complete_orphaned_tool_calls(messages, content="error: cut short")
+        assert inserted == 0
+        assert messages == before
+
+    def test_bedrock_error_phrasing_matches_orphan_regex(self):
+        from swival.agent import _ORPHANED_TOOL_CALL_RE
+
+        msg = (
+            'BedrockException - {"message":"The model returned the following '
+            "errors: messages.20: `tool_use` ids were found without `tool_result` "
+            "blocks immediately after: tooluse_9NqTHSFFoFTOJmI9s4mbm6. Each "
+            "`tool_use` block must have a corresponding `tool_result` block in "
+            'the next message."}'
+        )
+        assert _ORPHANED_TOOL_CALL_RE.search(msg)
+
+
 # ---------------------------------------------------------------------------
 # GEAP (Gemini Enterprise Agent Platform / Vertex AI) provider
 # ---------------------------------------------------------------------------

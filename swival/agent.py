@@ -32,6 +32,7 @@ from ._msg import (
     IMAGE_TOKEN_ESTIMATE as _IMAGE_TOKEN_ESTIMATE,
     RECAP_MARKER,
     _canonicalize_tool_calls,
+    _complete_orphaned_tool_calls,
     _has_image_content,
     _marquee_text_for_turn,
     _msg_get,
@@ -41,6 +42,7 @@ from ._msg import (
     _msg_tool_call_id,
     _msg_name,
     _set_msg_content,
+    _tool_call_id,
 )
 from .config import _UNSET
 from .report import (
@@ -472,7 +474,9 @@ _ORPHANED_TOOL_CALL_RE = re.compile(
     r"[Nn]o tool output found for function call"
     r"|tool_call_id .* not found"
     r"|tool results? .* missing"
-    r"|missing tool result",
+    r"|missing tool result"
+    r"|tool_use.{0,40}without.{0,30}tool_result"
+    r"|tool_use block must have a corresponding tool_result",
     re.IGNORECASE,
 )
 
@@ -1293,11 +1297,7 @@ def _fix_orphaned_tool_calls(messages: list) -> bool:
         tool_calls = _msg_tool_calls(msg)
         if not tool_calls:
             continue
-        kept = [
-            tc
-            for tc in tool_calls
-            if (tc.id if hasattr(tc, "id") else tc["id"]) in result_ids
-        ]
+        kept = [tc for tc in tool_calls if _tool_call_id(tc) in result_ids]
         if len(kept) == len(tool_calls):
             continue
         fixed = True
@@ -8337,6 +8337,24 @@ def run_agent_loop(
                     sys_msg["content"] = base
 
         _canonicalize_tool_calls(messages)
+
+        # A prior turn cut short between an assistant tool-call message and its
+        # results (user interrupt or external cancellation mid-dispatch) leaves
+        # a dangling tool_use that Anthropic-format providers reject. Backfill
+        # placeholder results so the history is valid before we send it.
+        _orphans_filled = _complete_orphaned_tool_calls(
+            messages,
+            content="error: tool call interrupted before it produced a result",
+        )
+        if _orphans_filled:
+            # Structural insert: invalidate any active index-based checkpoint so
+            # a later /restore can't collapse the wrong slice.
+            if snapshot_state is not None:
+                snapshot_state.invalidate_index_checkpoint()
+            if verbose:
+                fmt.warning(
+                    f"Backfilled {_orphans_filled} interrupted tool call(s) in history."
+                )
 
         token_est = estimate_tokens(messages, effective_tools)
         if verbose:

@@ -35,6 +35,11 @@ def _msg_tool_call_id(msg) -> str | None:
     return _msg_get(msg, "tool_call_id")
 
 
+def _tool_call_id(tc) -> str | None:
+    """Extract the id from a tool_call entry (dict or provider namespace)."""
+    return tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+
+
 def _msg_name(msg) -> str:
     return _msg_get(msg, "name") or ""
 
@@ -176,6 +181,53 @@ def _canonicalize_tool_calls(messages: list) -> None:
 
         if changed:
             msg["tool_calls"] = new_tcs
+
+
+def _complete_orphaned_tool_calls(messages: list, *, content: str) -> int:
+    """Backfill placeholder tool-result messages for unmatched tool_calls.
+
+    Anthropic-format providers (Bedrock, Vertex) reject a conversation whenever
+    a ``tool_use`` block has no ``tool_result`` block in the message that
+    follows it. That happens when the agent loop is cut short between emitting
+    an assistant tool-call message and producing its results — a user interrupt
+    or an external cancellation landing mid-dispatch. Some or all of the call's
+    results never get appended, leaving a dangling ``tool_use`` that poisons
+    every later request.
+
+    For each assistant message carrying tool_calls, this inserts a placeholder
+    result for every tool_call id that lacks one, positioned right after any
+    results that did make it in. Keeping the original tool_calls preserves the
+    model's reasoning and lets it see that the work was interrupted. Returns the
+    number of placeholders inserted.
+    """
+    inserted = 0
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if _msg_role(msg) != "assistant":
+            i += 1
+            continue
+        tool_calls = _msg_tool_calls(msg)
+        if not tool_calls:
+            i += 1
+            continue
+        j = i + 1
+        satisfied: set[str] = set()
+        while j < len(messages) and _msg_role(messages[j]) == "tool":
+            tc_id = _msg_tool_call_id(messages[j])
+            if tc_id:
+                satisfied.add(tc_id)
+            j += 1
+        backfill = [
+            {"role": "tool", "tool_call_id": tc_id, "content": content}
+            for tc in tool_calls
+            if (tc_id := _tool_call_id(tc)) and tc_id not in satisfied
+        ]
+        if backfill:
+            messages[j:j] = backfill
+            inserted += len(backfill)
+        i = j + len(backfill)
+    return inserted
 
 
 _MARQUEE_PIECE_BUDGET = 2048
