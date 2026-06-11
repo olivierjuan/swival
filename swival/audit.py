@@ -357,6 +357,10 @@ class AuditRunState:
     def save(self) -> None:
         d = self.state_dir / self.run_id
         d.mkdir(parents=True, exist_ok=True)
+        # Incremental saves run on the collector thread while worker threads
+        # still insert keys into metrics, truncated_files, and attack_scores
+        # (triage scoring fallback); dict() snapshots them in one C-level call
+        # so json iteration can't see a resize.
         blob = {
             "run_id": self.run_id,
             "scope": self.scope.to_dict(),
@@ -379,16 +383,16 @@ class AuditRunState:
             "import_index": self.import_index,
             "caller_index": self.caller_index,
             "symbol_spans_index": self.symbol_spans_index,
-            "attack_scores": self.attack_scores,
+            "attack_scores": dict(self.attack_scores),
             "verification_state": self.verification_state,
             "artifact_state": self.artifact_state,
             "phase": self.phase,
-            "metrics": self.metrics,
+            "metrics": dict(self.metrics),
             "select_all": self.select_all,
             "measure_triage": self.measure_triage,
             "measurement_escalated_paths": sorted(self.measurement_escalated_paths),
             "adjudication_discarded": self.adjudication_discarded,
-            "truncated_files": self.truncated_files,
+            "truncated_files": dict(self.truncated_files),
         }
         state_path = d / "state.json"
         tmp = state_path.with_suffix(".tmp")
@@ -4470,6 +4474,7 @@ def _run_batch(
     *,
     ui=None,
     label_for=None,
+    on_result=None,
 ):
     """Run fn(item) in parallel, return results preserving order.
 
@@ -4478,6 +4483,10 @@ def _run_batch(
     ``label_for(item)``, runs ``fn(item)``, then publishes
     ``worker_ended`` and returns the slot. Batch-level failures are
     routed through ``ui.warning`` instead of the global ``fmt.warning``.
+
+    ``on_result(idx, item, result)`` is invoked on the calling thread as
+    each item completes (in completion order, not submission order), while
+    other workers keep running. Failed items are reported with ``None``.
     """
     results = [None] * len(items)
     slot_queue: queue.Queue[int] | None = None
@@ -4529,6 +4538,8 @@ def _run_batch(
                 else:
                     fmt.warning(msg)
                 results[idx] = None
+            if on_result is not None:
+                on_result(idx, items[idx], results[idx])
     return results
 
 
@@ -5299,29 +5310,33 @@ def _run_pipeline_body(
         def _triage(path):
             return _phase2_triage_one(path, state, ctx)
 
-        def _collect_triage(results, ph):
-            for rec in results:
+        def _make_triage_collector(ph):
+            def _on_result(idx, item, rec):
                 if rec is not None:
                     state.triage_records[rec.path] = rec
                     state.reviewed_files.add(rec.path)
                 ph.advance()
+                state.save()
+                if not ui.is_live:
+                    done = len(state.reviewed_files)
+                    total = len(state.queued_files)
+                    fmt.info(f"  triage progress: {done}/{total}")
+
+            return _on_result
 
         pending = [f for f in state.queued_files if f not in state.reviewed_files]
         if pending:
             ph2 = _phase_open(ui, "triage", total=len(pending))
             if not ui.is_live:
                 fmt.info(f"phase 2: triaging {len(pending)} files...")
-            for batch_start in range(0, len(pending), workers * 2):
-                batch = pending[batch_start : batch_start + workers * 2]
-                results = _run_batch(
-                    _triage, batch, max_workers=workers, ui=ui, label_for=str
-                )
-                _collect_triage(results, ph2)
-                state.save()
-                done = len(state.reviewed_files)
-                total = len(state.queued_files)
-                if not ui.is_live:
-                    fmt.info(f"  triage progress: {done}/{total}")
+            _run_batch(
+                _triage,
+                pending,
+                max_workers=workers,
+                ui=ui,
+                label_for=str,
+                on_result=_make_triage_collector(ph2),
+            )
             ph2.complete(
                 f"{len(state.reviewed_files)}/{len(state.queued_files)} reviewed"
             )
@@ -5338,11 +5353,14 @@ def _run_pipeline_body(
                     f"phase 2: retrying {len(still_pending)} files "
                     f"(attempt {_triage_retry + 2})..."
                 )
-            results = _run_batch(
-                _triage, still_pending, max_workers=workers, ui=ui, label_for=str
+            _run_batch(
+                _triage,
+                still_pending,
+                max_workers=workers,
+                ui=ui,
+                label_for=str,
+                on_result=_make_triage_collector(ph2r),
             )
-            _collect_triage(results, ph2r)
-            state.save()
             ph2r.complete(f"retry attempt {_triage_retry + 2}")
 
         force_matches, force_warnings = _resolve_force_review(
@@ -5413,11 +5431,11 @@ def _run_pipeline_body(
         def _review(path):
             return _deep_review_one(path, state, ctx, ui=ui)
 
-        def _collect_deep_review(results, total_files, ph):
-            for result in results:
+        def _make_review_collector(total_files, ph):
+            def _on_result(idx, item, result):
                 if result is None:
                     ph.advance()
-                    continue
+                    return
                 done = len(state.deep_reviewed_files)
                 if result.error is not None:
                     ui.warning(
@@ -5425,7 +5443,7 @@ def _run_pipeline_body(
                         f"({result.error[:80]})"
                     )
                     ph.advance()
-                    continue
+                    return
                 n = len(result.findings) if result.findings else 0
                 if result.findings:
                     if state.measure_triage:
@@ -5444,7 +5462,10 @@ def _run_pipeline_body(
                 label = f"{n} finding(s)" if n else "no findings"
                 if not ui.is_live:
                     fmt.info(f"  [{done}/{total_files}] {result.path}: {label}")
+                state.save()
                 ph.advance()
+
+            return _on_result
 
         for _dr_attempt in range(3):
             pending = [
@@ -5465,13 +5486,14 @@ def _run_pipeline_body(
                         f"(attempt {_dr_attempt + 1})..."
                     )
 
-            for batch_start in range(0, len(pending), workers * 2):
-                batch = pending[batch_start : batch_start + workers * 2]
-                results = _run_batch(
-                    _review, batch, max_workers=workers, ui=ui, label_for=str
-                )
-                _collect_deep_review(results, total_files, ph3)
-                state.save()
+            _run_batch(
+                _review,
+                pending,
+                max_workers=workers,
+                ui=ui,
+                label_for=str,
+                on_result=_make_review_collector(total_files, ph3),
+            )
             reviewed_this_attempt = len(state.deep_reviewed_files) - reviewed_before
             ph3.complete(
                 f"{reviewed_this_attempt}/{len(pending)} reviewed this attempt "
