@@ -5147,10 +5147,12 @@ _PHASE_TITLES: dict[str, tuple[str, str]] = {
 
 
 def _phase_open(
-    ui: AuditUI, phase_key: str, *, total: int | None = None
+    ui: AuditUI, phase_key: str, *, total: int | None = None, label: str | None = None
 ) -> PhaseHandle:
     title, color_key = _PHASE_TITLES[phase_key]
-    if total is not None:
+    if label is not None:
+        title = f"{title} · {label}"
+    elif total is not None:
         title = f"{title} · {total} item{'s' if total != 1 else ''}"
     return ui.phase(title, total=total, color=fmt.phase_color(color_key))
 
@@ -5203,7 +5205,13 @@ def _run_pipeline_body(
 
     # Phase 1: scope + profile
     if state.phase == "init":
-        ph1 = _phase_open(ui, "inventory", total=4)
+        n_files = len(state.scope.mandatory_files)
+        ph1 = _phase_open(
+            ui,
+            "inventory",
+            total=4,
+            label=f"{n_files} file{'s' if n_files != 1 else ''}",
+        )
         ph1.set_current(f"loading {len(state.scope.mandatory_files)} files")
         if not ui.is_live:
             fmt.info(
