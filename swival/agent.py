@@ -33,6 +33,7 @@ from ._msg import (
     RECAP_MARKER,
     _canonicalize_tool_calls,
     _complete_orphaned_tool_calls,
+    _estimate_tokens,
     _has_image_content,
     _marquee_text_for_turn,
     _msg_get,
@@ -4240,7 +4241,142 @@ def _call_llm_with_dismiss(dismiss, llm_args, **llm_kwargs):
     return call_llm(*llm_args, **llm_kwargs)
 
 
-def _completion_via_stream(completion_kwargs, on_stream_start=None, display=True):
+def _reasoning_value_to_text(val) -> str:
+    """Flatten a reasoning field value into plain text.
+
+    Handles the shapes providers stream reasoning in: a plain string, or a
+    nested object/dict carrying ``summary`` / ``thinking`` / ``text`` /
+    ``content`` (OpenAI Responses-style reasoning blocks), each of which may be
+    a string or a list of strings or ``{text: ...}`` parts.
+    """
+    if not val:
+        return ""
+    if isinstance(val, str):
+        return val
+
+    parts: list[str] = []
+    for key in ("summary", "thinking", "text", "content"):
+        sub = _msg_get(val, key)
+        if isinstance(sub, str):
+            parts.append(sub)
+        elif isinstance(sub, list):
+            for item in sub:
+                if isinstance(item, str):
+                    parts.append(item)
+                else:
+                    t = _msg_get(item, "text")
+                    if isinstance(t, str):
+                        parts.append(t)
+    return "".join(parts)
+
+
+def _extract_reasoning_delta(delta) -> str:
+    """Pull reasoning text from a streaming delta across provider shapes.
+
+    Single source of truth for the reasoning fields LiteLLM surfaces:
+    ``reasoning_content`` first, falling back to ``reasoning`` only when the
+    former is absent for this delta (providers often set both to the same text,
+    so preferring one avoids duplicating the stream).
+    """
+    text = _reasoning_value_to_text(_msg_get(delta, "reasoning_content"))
+    if text:
+        return text
+    return _reasoning_value_to_text(_msg_get(delta, "reasoning"))
+
+
+class _InlineThinkSplitter:
+    """Route streamed ``content`` between the answer and inline ``<think>``.
+
+    Some open-weight servers leak reasoning into the visible content channel as
+    ``<think>...</think>`` rather than a separate reasoning field. This is a
+    streaming state machine: each :meth:`feed` returns the (answer, reasoning)
+    split for one chunk, buffering a trailing partial that might be the start of
+    a tag so a tag split across a chunk boundary is handled correctly.
+
+    Display-only: it never touches the raw chunks handed to
+    ``stream_chunk_builder``, so the reconstructed message content is identical
+    to the non-streaming path and the existing sanitizers stay authoritative.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._in_think = False
+        self._pending = ""
+        # The leak we route is reasoning emitted at the very start of content
+        # (the anchored ``^\s*<think>`` shape the sanitizers already expect).
+        # Once real answer text has streamed, a later ``<think>`` is treated as
+        # literal prose so we don't over-capture a model discussing the tag.
+        self._seen_answer = False
+
+    @staticmethod
+    def _hold_len(seg: str, tag: str) -> int:
+        """Length of the longest suffix of *seg* that is a proper prefix of *tag*."""
+        sl = seg.lower()
+        tl = tag.lower()
+        for k in range(min(len(seg), len(tag) - 1), 0, -1):
+            if sl.endswith(tl[:k]):
+                return k
+        return 0
+
+    def feed(self, text: str) -> tuple[str, str]:
+        buf = self._pending + text
+        self._pending = ""
+        lower = buf.lower()
+        answer: list[str] = []
+        reason: list[str] = []
+
+        def _to_answer(s: str) -> None:
+            if not s:
+                return
+            answer.append(s)
+            if s.strip():
+                self._seen_answer = True
+
+        i = 0
+        n = len(buf)
+        while i < n:
+            if self._in_think:
+                idx = lower.find(self._CLOSE, i)
+                if idx == -1:
+                    seg = buf[i:]
+                    hold = self._hold_len(seg, self._CLOSE)
+                    reason.append(seg[: len(seg) - hold] if hold else seg)
+                    self._pending = seg[len(seg) - hold :] if hold else ""
+                    break
+                reason.append(buf[i:idx])
+                i = idx + len(self._CLOSE)
+                self._in_think = False
+                continue
+            idx = lower.find(self._OPEN, i)
+            if idx == -1:
+                seg = buf[i:]
+                hold = self._hold_len(seg, self._OPEN)
+                _to_answer(seg[: len(seg) - hold] if hold else seg)
+                self._pending = seg[len(seg) - hold :] if hold else ""
+                break
+            _to_answer(buf[i:idx])
+            if self._seen_answer:
+                _to_answer(buf[idx : idx + len(self._OPEN)])
+                i = idx + len(self._OPEN)
+            else:
+                i = idx + len(self._OPEN)
+                self._in_think = True
+        return "".join(answer), "".join(reason)
+
+    def flush(self) -> tuple[str, str]:
+        """Emit any buffered partial that never completed a tag, at stream end."""
+        pending = self._pending
+        self._pending = ""
+        if not pending:
+            return "", ""
+        return ("", pending) if self._in_think else (pending, "")
+
+
+def _completion_via_stream(
+    completion_kwargs, on_stream_start=None, display=True, show_thinking=False
+):
     """Run litellm.completion with stream=True, displaying a marquee, and
     reassemble a non-streaming response object via stream_chunk_builder.
 
@@ -4250,65 +4386,101 @@ def _completion_via_stream(completion_kwargs, on_stream_start=None, display=True
     When *display* is False the chunks are consumed silently — used for servers
     that only ever speak SSE (Apple Foundation Models) where we must stream to
     parse the reply but have no reason to show a live marquee.
+
+    Each streamed fragment is routed to one of three channels — reasoning,
+    answer, activity — and rendered distinctly (see ``fmt.stream_channels``).
+    With *show_thinking* the full reasoning is reprinted to stderr after the
+    transient region is wiped; otherwise a one-line collapsed note is shown.
     """
     import litellm
 
     stream_kwargs = {**completion_kwargs, "stream": True}
     chunks = []
-    # The raw display only shows the last viewport's worth of rows, so we keep a
-    # bounded sliding window instead of accumulating the whole response (avoids
-    # O(n^2) string growth over thousands of chunks). Roughly two screens is
-    # invisible to the user yet ample for the trim in stream_raw.
-    tail = ""
+    # The display only shows the last viewport's worth of rows, so each channel
+    # keeps a bounded sliding window instead of accumulating the whole response
+    # (avoids O(n^2) string growth over thousands of chunks). Roughly two
+    # screens is invisible to the user yet ample for the trim in the renderer.
     tail_cap = max(fmt._console.width * fmt._console.height * 2, 8192)
+    tails = {"reasoning": "", "answer": "", "activity": ""}
+    # Full reasoning is kept only when retention is requested, so the default
+    # path stays bounded. It survives the transient wipe via fmt.thinking_*.
+    reasoning_full: list[str] = []
+    total_visible = 0
+    splitter = _InlineThinkSplitter()
     # Hold off on dismissing the caller's waiting display until we have enough
     # streamed text to fill the line — otherwise the brief, narrow stream
-    # display would prematurely cut off the wider prompt-marquee animation.
+    # display would prematurely cut off the wider prompt-marquee animation. All
+    # visible channels count toward the threshold, so a long thinking preamble
+    # dismisses the marquee at the same point a long answer would.
     handoff_threshold = max(fmt._console.width, 40)
     with contextlib.ExitStack() as stack:
         update = None
 
-        def _on_delta(text: str) -> None:
-            nonlocal tail, update
-            if not display:
+        def _accumulate(channel: str, text: str) -> None:
+            nonlocal total_visible
+            if not text:
                 return
-            tail += text
-            if len(tail) > tail_cap:
-                tail = tail[-tail_cap // 2 :]
+            buf = tails[channel] + text
+            if len(buf) > tail_cap:
+                buf = buf[-tail_cap // 2 :]
+            tails[channel] = buf
+            total_visible += len(text)
+            if channel == "reasoning" and show_thinking:
+                reasoning_full.append(text)
+
+        def _refresh() -> None:
+            nonlocal update
             if update is None:
-                if len(tail) < handoff_threshold:
+                if total_visible < handoff_threshold:
                     return
                 if on_stream_start is not None:
                     try:
                         on_stream_start()
                     except Exception:
                         pass
-                update = stack.enter_context(fmt.stream_raw())
-            update(tail)
+                update = stack.enter_context(fmt.stream_channels())
+            update(tails["reasoning"], tails["answer"], tails["activity"])
 
         response_stream = litellm.completion(**stream_kwargs)
         for chunk in response_stream:
             chunks.append(chunk)
+            if not display:
+                continue
             try:
                 delta = chunk.choices[0].delta
             except Exception:
                 continue
             content = getattr(delta, "content", None) or ""
             if content:
-                _on_delta(content)
-            reasoning = getattr(delta, "reasoning_content", None) or ""
-            if reasoning:
-                _on_delta(reasoning)
+                answer_text, inline_reasoning = splitter.feed(content)
+                _accumulate("reasoning", inline_reasoning)
+                _accumulate("answer", answer_text)
+            _accumulate("reasoning", _extract_reasoning_delta(delta))
             for tc in getattr(delta, "tool_calls", None) or []:
                 fn = getattr(tc, "function", None)
                 if fn is None:
                     continue
                 name = getattr(fn, "name", None)
                 if name:
-                    _on_delta(f" <{name}>")
+                    _accumulate("activity", f" <{name}>")
                 args = getattr(fn, "arguments", None) or ""
                 if args:
-                    _on_delta(args)
+                    _accumulate("activity", args)
+            _refresh()
+        if display:
+            answer_text, inline_reasoning = splitter.flush()
+            _accumulate("reasoning", inline_reasoning)
+            _accumulate("answer", answer_text)
+            if update is not None:
+                update(tails["reasoning"], tails["answer"], tails["activity"])
+
+    if display and (reasoning_full or tails["reasoning"].strip()):
+        if show_thinking and reasoning_full:
+            fmt.thinking_block("".join(reasoning_full))
+        elif not show_thinking and tails["reasoning"].strip():
+            text = tails["reasoning"]
+            fmt.thinking_summary(text.count("\n") + 1, _estimate_tokens(text))
+
     return litellm.stream_chunk_builder(
         chunks, messages=completion_kwargs.get("messages")
     )
@@ -4322,6 +4494,7 @@ def _completion_with_retry(
     stream=False,
     on_stream_start=None,
     stream_display=True,
+    show_thinking=False,
 ):
     """Call litellm.completion() with retry on transient errors.
 
@@ -4347,6 +4520,7 @@ def _completion_with_retry(
                         completion_kwargs,
                         on_stream_start=on_stream_start,
                         display=stream_display,
+                        show_thinking=show_thinking,
                     ),
                     attempt,
                 )
@@ -4409,6 +4583,7 @@ def call_llm(
     extra_body=None,
     reasoning_effort=None,
     sanitize_thinking=None,
+    show_thinking=False,
     prompt_cache=True,
     cache=None,
     secret_shield=None,
@@ -4705,14 +4880,16 @@ def call_llm(
         return msg
 
     _show_stream = (
-        provider in ("generic", "llamacpp", "lmstudio", "huggingface", "openrouter")
+        provider
+        in ("generic", "llamacpp", "lmstudio", "huggingface", "openrouter", "applefm")
         and verbose
         and call_kind == "agent"
         and sys.stderr.isatty()
     )
     # Apple's Foundation Models server only ever answers with SSE, even when the
     # request does not ask to stream, so we must consume it as a stream to parse
-    # the reply at all — independently of whether we show a live marquee.
+    # the reply at all — independently of whether we show a live marquee. When
+    # the user-facing gates above are met, applefm shows live thinking too.
     _must_stream = provider == "applefm"
     _stream = _show_stream or _must_stream
 
@@ -4790,6 +4967,7 @@ def call_llm(
                 stream=_stream,
                 on_stream_start=on_stream_start if _show_stream else None,
                 stream_display=_show_stream,
+                show_thinking=show_thinking,
             )
     except ContextOverflowError:
         raise  # already has _provider_retries from _completion_with_retry
@@ -5200,6 +5378,14 @@ def build_parser():
         action="store_true",
         default=_UNSET,
         help="Strip leaked <think> tags from assistant responses.",
+    )
+
+    provider_group.add_argument(
+        "--show-thinking",
+        action="store_true",
+        default=_UNSET,
+        help="Keep streamed model thinking in scrollback after the answer "
+        "(stderr only; requires a verbose, interactive terminal).",
     )
 
     provider_group.add_argument(
@@ -7361,6 +7547,7 @@ def _run_main(args, report, _write_report, parser):
         "extra_body": getattr(args, "extra_body", None),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
         "sanitize_thinking": getattr(args, "sanitize_thinking", None),
+        "show_thinking": getattr(args, "show_thinking", None),
     }
 
     # Provider-specific model discovery and context configuration
@@ -7386,6 +7573,8 @@ def _run_main(args, report, _write_report, parser):
         llm_kwargs["reasoning_effort"] = args.reasoning_effort
     if getattr(args, "sanitize_thinking", False):
         llm_kwargs["sanitize_thinking"] = True
+    if getattr(args, "show_thinking", False):
+        llm_kwargs["show_thinking"] = True
     if not getattr(args, "prompt_cache", True):
         llm_kwargs["prompt_cache"] = False
     llm_kwargs["max_retries"] = args.retries
@@ -10112,7 +10301,13 @@ def _repl_profile(
     except (ConfigError, AgentError) as exc:
         return current_profile, f"profile switch failed: {exc}", True
 
-    for key in ("user_agent", "extra_body", "reasoning_effort", "sanitize_thinking"):
+    for key in (
+        "user_agent",
+        "extra_body",
+        "reasoning_effort",
+        "sanitize_thinking",
+        "show_thinking",
+    ):
         val = merged.get(key)
         if val is not None:
             llm_kwargs[key] = val
@@ -10128,6 +10323,7 @@ def _repl_profile(
         "extra_body",
         "reasoning_effort",
         "sanitize_thinking",
+        "show_thinking",
     }
     old_llm_kwargs = repl_kwargs.get("llm_kwargs", {})
     for key, val in old_llm_kwargs.items():

@@ -101,6 +101,7 @@ class Session:
         reasoning_effort: str | None = None,
         continue_here: bool = True,
         sanitize_thinking: bool | None = None,
+        show_thinking: bool | None = None,
         prompt_cache: bool = True,
         cache: bool = False,
         cache_dir: str | None = None,
@@ -187,6 +188,7 @@ class Session:
         self.extra_body = extra_body
         self.reasoning_effort = reasoning_effort
         self.sanitize_thinking = sanitize_thinking
+        self.show_thinking = show_thinking
         self.prompt_cache = prompt_cache
         self.continue_here = continue_here
         self.cache = cache
@@ -314,6 +316,8 @@ class Session:
             self._llm_kwargs["reasoning_effort"] = self.reasoning_effort
         if self.sanitize_thinking is not None:
             self._llm_kwargs["sanitize_thinking"] = self.sanitize_thinking
+        if self.show_thinking is not None:
+            self._llm_kwargs["show_thinking"] = self.show_thinking
         if not self.prompt_cache:
             self._llm_kwargs["prompt_cache"] = False
         self._llm_kwargs["max_retries"] = self.retries

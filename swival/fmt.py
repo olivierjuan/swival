@@ -497,7 +497,7 @@ def _collapse_blank_rows(rows: list[str]) -> list[str]:
     return out
 
 
-def _tail_to_viewport(text: str, width: int, height: int) -> Text:
+def _wrap_and_tail(text: str, width: int, height: int) -> list[str]:
     """Return the last *height* visual rows of *text*, wrapped at *width*.
 
     Tails by visual rows rather than source lines, so a single paragraph that
@@ -505,14 +505,89 @@ def _tail_to_viewport(text: str, width: int, height: int) -> Text:
     overflowing. This keeps the newest streamed output on screen; Rich's own
     overflow handling would crop from the top instead. Blank runs are collapsed
     before tailing so the visible window stays dense with real content.
+
+    This is the wrapping/tailing half of the streaming display, kept free of
+    styling so per-channel renderers can apply their own styles to the rows.
     """
     width = max(width, 1)
     rows: list[str] = []
     for line in text.split("\n"):
         rows.extend(_wrap_to_rows(line, width))
     rows = _collapse_blank_rows(rows)
-    tail = rows[-max(height, 1) :]
-    return Text("\n".join(tail), style="dim")
+    return rows[-max(height, 1) :]
+
+
+def _tail_to_viewport(text: str, width: int, height: int) -> Text:
+    """Dim-styled tail of *text* for the legacy single-channel stream view."""
+    return Text("\n".join(_wrap_and_tail(text, width, height)), style="dim")
+
+
+# When the answer has started streaming, the reasoning channel is demoted to a
+# small tail above the answer so a long chain of thought can't crowd out the
+# reply the user is actually waiting for.
+_THINK_TAIL_ROWS = 3
+
+
+def render_stream_channels(
+    reasoning: str, answer: str, activity: str, width: int, height: int
+) -> Text:
+    """Compose the three streaming channels into a single viewport-sized Text.
+
+    Layout, top to bottom: a dim/italic ``thinking…`` block, the normal-weight
+    answer, then a dim activity tail for streamed tool-call metadata. Row budget
+    is allocated by state so the answer keeps priority once it begins:
+
+    - no reasoning and no activity: identical to the legacy single-stream view;
+    - reasoning only (answer not started): reasoning fills the viewport;
+    - answer present: the answer takes most rows, reasoning keeps a short tail.
+    """
+    width = max(width, 1)
+    height = max(height, 1)
+    reasoning = reasoning or ""
+    answer = answer or ""
+    activity = activity or ""
+    has_r = bool(reasoning.strip())
+    has_a = bool(answer.strip())
+    has_v = bool(activity.strip())
+
+    if not has_r and not has_v:
+        return _tail_to_viewport(answer, width, height)
+
+    activity_rows = _wrap_and_tail(activity, width, min(2, height)) if has_v else []
+    body = max(height - len(activity_rows), 1)
+
+    if has_r:
+        header = 1
+        if has_a:
+            think_budget = min(_THINK_TAIL_ROWS, max(body - header - 1, 1))
+        else:
+            think_budget = max(body - header, 1)
+        think_rows = _wrap_and_tail(reasoning, width, think_budget)
+    else:
+        think_rows = []
+
+    answer_budget = body - len(think_rows) - (1 if has_r else 0)
+    answer_rows = _wrap_and_tail(answer, width, max(answer_budget, 1)) if has_a else []
+
+    text = Text()
+    first = True
+
+    def _emit(row: str, style: str) -> None:
+        nonlocal first
+        if not first:
+            text.append("\n")
+        text.append(row, style=style)
+        first = False
+
+    if has_r:
+        _emit("thinking…", "dim italic")
+        for row in think_rows:
+            _emit(row, "dim italic")
+    for row in answer_rows:
+        _emit(row, "")
+    for row in activity_rows:
+        _emit(row, "dim")
+    return text
 
 
 @contextlib.contextmanager
@@ -543,6 +618,58 @@ def stream_raw():
             )
 
         yield update
+
+
+@contextlib.contextmanager
+def stream_channels():
+    """Channel-aware variant of :func:`stream_raw`.
+
+    Yields an ``update(reasoning, answer, activity)`` callable that redraws the
+    viewport with thinking, answer, and tool-call activity styled distinctly.
+    Like ``stream_raw`` the region is transient and a no-op off a terminal.
+    """
+    if not _console.is_terminal:
+        yield _noop
+        return
+
+    with Live(
+        console=_console,
+        transient=True,
+        auto_refresh=False,
+        vertical_overflow="crop",
+    ) as live:
+
+        def update(reasoning: str = "", answer: str = "", activity: str = "") -> None:
+            height = max(_console.height - 2, 1)
+            live.update(
+                render_stream_channels(
+                    reasoning, answer, activity, max(_console.width, 1), height
+                ),
+                refresh=True,
+            )
+
+        yield update
+
+
+def thinking_block(text: str) -> None:
+    """Print retained reasoning to stderr after a transient stream is wiped.
+
+    Used by the opt-in ``--show-thinking`` retention so the thinking the user
+    watched scroll by survives in scrollback. Dim/italic, stderr only — never
+    the final-answer stdout channel.
+    """
+    if not text or not text.strip():
+        return
+    _console.print(Text("thinking", style="bold dim"))
+    for line in text.splitlines():
+        _console.print(Text(line, style="dim italic"))
+
+
+def thinking_summary(lines: int, tokens: int) -> None:
+    """Print a one-line collapsed note that reasoning was streamed and hidden."""
+    _console.print(
+        Text(f"  thinking: {lines} lines / ~{tokens} tokens, hidden", style="dim")
+    )
 
 
 def completion(turns: int, exit_code: str) -> None:

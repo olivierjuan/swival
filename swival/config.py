@@ -43,6 +43,7 @@ PROFILE_KEYS: set[str] = {
     "extra_body",
     "reasoning_effort",
     "sanitize_thinking",
+    "show_thinking",
 }
 
 _PROFILE_METADATA_KEYS: set[str] = {"description"}
@@ -108,6 +109,7 @@ CONFIG_KEYS: dict[str, type | tuple[type, ...]] = {
     "cache": bool,
     "prompt_cache": bool,
     "sanitize_thinking": bool,
+    "show_thinking": bool,
     "cache_dir": str,
     "serve_name": str,
     "serve_description": str,
@@ -216,6 +218,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "extra_body": None,
     "reasoning_effort": None,
     "sanitize_thinking": False,
+    "show_thinking": False,
     "cache": False,
     "prompt_cache": True,
     "cache_dir": None,
@@ -1139,6 +1142,7 @@ def args_to_session_kwargs(args, base_dir: str) -> dict:
         "extra_body",
         "reasoning_effort",
         "sanitize_thinking",
+        "show_thinking",
         "prompt_cache",
         "cache",
         "cache_dir",
@@ -1377,6 +1381,7 @@ def generate_config(
         "# extra_body = { chat_template_kwargs = { enable_thinking = false } }",
         '# reasoning_effort = "medium"     # "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "default"',
         "# sanitize_thinking = true        # strip leaked <think> tags from assistant responses (default: off)",
+        "# show_thinking = true            # keep streamed thinking in scrollback after the answer (default: off)",
         "",
         "# --- Agent behaviour ---",
         "# max_turns = 50",

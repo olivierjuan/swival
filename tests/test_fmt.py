@@ -930,3 +930,52 @@ class TestStreamRaw:
         # A transient Live wipes its rendered region on exit, which emits an
         # erase-in-line control sequence.
         assert "\x1b[2K" in out
+
+
+class TestRenderStreamChannels:
+    def test_answer_only_matches_legacy_view(self):
+        # No reasoning and no activity: identical to the single-stream display.
+        text = "\n".join(f"line{i}" for i in range(20))
+        composed = fmt.render_stream_channels("", text, "", width=40, height=6).plain
+        legacy = fmt._tail_to_viewport(text, 40, 6).plain
+        assert composed == legacy
+
+    def test_thinking_gets_header_and_fills_when_no_answer(self):
+        out = fmt.render_stream_channels(
+            "reasoning a\nreasoning b", "", "", width=40, height=6
+        ).plain
+        lines = out.split("\n")
+        assert lines[0] == "thinking…"
+        assert "reasoning a" in out
+        assert "reasoning b" in out
+
+    def test_answer_keeps_priority_over_long_thinking(self):
+        reasoning = "\n".join(f"think{i}" for i in range(50))
+        answer = "\n".join(f"ans{i}" for i in range(50))
+        out = fmt.render_stream_channels(
+            reasoning, answer, "", width=40, height=10
+        ).plain
+        lines = out.split("\n")
+        think_lines = [
+            ln for ln in lines if ln.startswith("think") and ln[-1].isdigit()
+        ]
+        ans_lines = [ln for ln in lines if ln.startswith("ans")]
+        # Reasoning is demoted to a short tail; the answer gets the rest.
+        assert len(think_lines) <= fmt._THINK_TAIL_ROWS
+        assert len(ans_lines) > len(think_lines)
+        # The newest answer rows survive.
+        assert "ans49" in out
+
+    def test_activity_lands_at_bottom(self):
+        out = fmt.render_stream_channels(
+            "", "the answer", " <read_file>", width=40, height=8
+        ).plain
+        lines = out.split("\n")
+        assert "the answer" in out
+        assert "read_file" in lines[-1]
+
+    def test_too_short_viewport_does_not_crash(self):
+        out = fmt.render_stream_channels(
+            "a\nb\nc", "d\ne\nf", " <tool>", width=10, height=1
+        ).plain
+        assert isinstance(out, str)
