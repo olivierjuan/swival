@@ -137,12 +137,30 @@
 <p>Add it to your <code>swival.toml</code>:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = &quot;--no-warnings&quot;
 </code></pre>
+<p>Or, if you prefer the JSON config, add this to <code>.swival/mcp.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;chrome&quot;: {
+      &quot;command&quot;: &quot;npx&quot;,
+      &quot;args&quot;: [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;],
+      &quot;env&quot;: { &quot;NODE_OPTIONS&quot;: &quot;--no-warnings&quot; }
+    }
+  }
+}
+</code></pre>
+<p>The two <code>--no-*</code> flags and the <code>NODE_OPTIONS</code> setting keep the server quiet on startup — see <a href="#quieting-startup-output">Quieting startup output</a> for what each one suppresses. They're optional, so drop them if you don't mind the banners.</p>
 <p>This launches Chrome with a visible window. For headless operation (no UI), add <code>--headless</code>:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = &quot;--no-warnings&quot;
 </code></pre>
 <p>Requires Node.js v20.19+ and Chrome (stable channel).</p>
 <h3 id="what-it-gives-swival">What it gives Swival</h3>
@@ -156,16 +174,30 @@ args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless
 <p>For throwaway sessions that leave no browser state behind:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--isolated&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--isolated&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = &quot;--no-warnings&quot;
 </code></pre>
 <p>The <code>--isolated</code> flag creates a temporary profile that gets cleaned up when the session ends.</p>
 <h3 id="slim-mode">Slim mode</h3>
 <p>If you only need basic navigation and don't want the full DevTools toolset (performance, emulation, etc.), use <code>--slim</code>:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--slim&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--slim&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = &quot;--no-warnings&quot;
 </code></pre>
 <p>This reduces the number of tools exposed to the model, which saves context window space.</p>
+<h3 id="quieting-startup-output">Quieting startup output</h3>
+<p>By default the server prints a few notices to stderr when Swival launches it. They're harmless, but if you'd rather not see them, the examples above already include the flags that turn them off. Here's what each one does:</p>
+<ul>
+<li><code>--no-usage-statistics</code> stops the "Google collects usage statistics" notice. Setting the <code>CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS</code> environment variable (or running under <code>CI</code>) has the same effect.</li>
+<li><code>--no-performance-crux</code> stops the message about sending trace URLs to the Google CrUX API.</li>
+<li><code>NODE_OPTIONS=--no-warnings</code> silences the <code>ExperimentalWarning: localStorage is not available</code> line, which comes from Node itself rather than the server, so no server flag controls it.</li>
+</ul>
+<p>One notice has no off switch: the security banner that begins "chrome-devtools-mcp exposes content of the browser instance" is printed unconditionally. If you want a completely silent startup, point <code>command</code> at a small wrapper script that runs the server and discards its stderr (<code>npx ... 2&gt;/dev/null</code>).</p>
 <h2 id="lightpanda-mcp">Lightpanda MCP</h2>
 <p><a href="https://lightpanda.io/">Lightpanda</a> is a headless browser built from scratch for AI agents. It skips pixel rendering entirely and focuses on DOM processing and JavaScript execution via V8. The result is roughly 10x faster page loads and 10x less memory than headless Chrome.</p>
 <p>Lightpanda has a built-in MCP server that you can connect to Swival directly. It exposes seven tools focused on content extraction: <code>goto</code> for navigation, <code>markdown</code> for page content as markdown, <code>links</code> for extracting all links, <code>semantic_tree</code> for an AI-friendly DOM representation, <code>interactiveElements</code> for listing buttons and inputs, <code>structuredData</code> for JSON-LD and OpenGraph metadata, and <code>evaluate</code> for running JavaScript.</p>
@@ -190,6 +222,16 @@ sudo mv ./lightpanda /usr/local/bin/
 <pre><code class="language-toml">[mcp_servers.lightpanda]
 command = &quot;lightpanda&quot;
 args = [&quot;mcp&quot;]
+</code></pre>
+<p>Or, if you prefer the JSON config, add this to <code>.swival/mcp.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;lightpanda&quot;: {
+      &quot;command&quot;: &quot;lightpanda&quot;,
+      &quot;args&quot;: [&quot;mcp&quot;]
+    }
+  }
+}
 </code></pre>
 <p>That's the entire setup. No Node.js, no Chrome download, no browser process lingering in the background. Lightpanda starts in milliseconds and uses about 24 MB of memory per instance compared to Chrome's 207 MB.</p>
 <h3 id="what-it-gives-swival_1">What it gives Swival</h3>

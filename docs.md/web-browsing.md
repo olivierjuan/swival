@@ -20,15 +20,37 @@ Add it to your `swival.toml`:
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest"]
+args = ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--no-performance-crux"]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = "--no-warnings"
 ```
+
+Or, if you prefer the JSON config, add this to `.swival/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "chrome": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--no-performance-crux"],
+      "env": { "NODE_OPTIONS": "--no-warnings" }
+    }
+  }
+}
+```
+
+The two `--no-*` flags and the `NODE_OPTIONS` setting keep the server quiet on startup — see [Quieting startup output](#quieting-startup-output) for what each one suppresses. They're optional, so drop them if you don't mind the banners.
 
 This launches Chrome with a visible window. For headless operation (no UI), add `--headless`:
 
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--headless"]
+args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--no-usage-statistics", "--no-performance-crux"]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = "--no-warnings"
 ```
 
 Requires Node.js v20.19+ and Chrome (stable channel).
@@ -53,7 +75,10 @@ For throwaway sessions that leave no browser state behind:
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"]
+args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated", "--no-usage-statistics", "--no-performance-crux"]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = "--no-warnings"
 ```
 
 The `--isolated` flag creates a temporary profile that gets cleaned up when the session ends.
@@ -65,10 +90,23 @@ If you only need basic navigation and don't want the full DevTools toolset (perf
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--slim"]
+args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--slim", "--no-usage-statistics", "--no-performance-crux"]
+
+[mcp_servers.chrome.env]
+NODE_OPTIONS = "--no-warnings"
 ```
 
 This reduces the number of tools exposed to the model, which saves context window space.
+
+### Quieting startup output
+
+By default the server prints a few notices to stderr when Swival launches it. They're harmless, but if you'd rather not see them, the examples above already include the flags that turn them off. Here's what each one does:
+
+- `--no-usage-statistics` stops the "Google collects usage statistics" notice. Setting the `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` environment variable (or running under `CI`) has the same effect.
+- `--no-performance-crux` stops the message about sending trace URLs to the Google CrUX API.
+- `NODE_OPTIONS=--no-warnings` silences the `ExperimentalWarning: localStorage is not available` line, which comes from Node itself rather than the server, so no server flag controls it.
+
+One notice has no off switch: the security banner that begins "chrome-devtools-mcp exposes content of the browser instance" is printed unconditionally. If you want a completely silent startup, point `command` at a small wrapper script that runs the server and discards its stderr (`npx ... 2>/dev/null`).
 
 ## Lightpanda MCP
 
@@ -112,6 +150,19 @@ Add it to your `swival.toml`:
 [mcp_servers.lightpanda]
 command = "lightpanda"
 args = ["mcp"]
+```
+
+Or, if you prefer the JSON config, add this to `.swival/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "lightpanda": {
+      "command": "lightpanda",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
 That's the entire setup. No Node.js, no Chrome download, no browser process lingering in the background. Lightpanda starts in milliseconds and uses about 24 MB of memory per instance compared to Chrome's 207 MB.
