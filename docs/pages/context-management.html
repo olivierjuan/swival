@@ -105,7 +105,7 @@
 <p>Swival's context management operates as four concentric layers of defense.</p>
 <p><strong>Layer 1 — Prevention.</strong> Tool output is capped before it enters the conversation. A file read that returns 200KB of content is truncated to 50KB. A grep that matches thousands of lines returns the first 100. Command output over 10KB is saved to a file and replaced with a pointer. MCP tool schemas that would consume too much of the window are dropped at startup. These limits keep junk out of the context so compaction rarely needs to fire.</p>
 <p><strong>Layer 2 — Proactive collapse.</strong> The agent can actively manage its own context using the <code>snapshot</code> tool. After reading several files to understand a problem, the agent calls <code>snapshot restore</code> with a summary of what it learned. The file reads — often 10K+ tokens of dead weight — are replaced with a ~200 token summary. The agent keeps the knowledge; the context gets the space back.</p>
-<p><strong>Layer 3 — Reactive compaction.</strong> When the context fills up despite prevention and proactive collapse, Swival runs a graduated compaction pipeline. It starts gentle (shrinking old tool results), escalates if needed (dropping low-importance turns with the last 3 turns protected), and has a last-resort nuclear option (keeping only the system prompt, a summary, and the last 2 turns). Each level is tried in sequence, and the agent only moves to the next if the previous wasn't enough.</p>
+<p><strong>Layer 3 — Reactive compaction.</strong> When the context fills up despite prevention and proactive collapse, Swival sends the structured prompt context through a single compaction entrypoint. It starts gentle (shrinking old tool results and prompt-only reasoning payloads), escalates if needed (dropping low-importance turns with the last 3 turns protected), and only drops tools or truncates system instructions as last resorts. Each retry uses the smallest request shape that is likely to fit, and temporary tool removal is restored on later turns.</p>
 <p><strong>Layer 4 — Knowledge survival.</strong> Thinking notes, todo lists, and snapshot summaries live outside the message history in independent channels that compaction cannot touch. Even after the most aggressive compaction wipes nearly everything, the agent still knows its reasoning, its task list, and what it learned during investigation.</p>
 <h2 id="prevention-output-size-guards">Prevention: Output Size Guards</h2>
 <p>Every tool that returns content has a hard cap on how much it can put into the conversation.</p>
@@ -143,12 +143,15 @@
 <h3 id="nudges">Nudges</h3>
 <p>After 5 consecutive turns of read-only work (reading files, grepping, thinking), Swival nudges the agent to consider using <code>snapshot restore</code> to compress its investigation. The nudge fires once per read streak and doesn't repeat until the agent breaks the streak with a non-read operation.</p>
 <h2 id="reactive-compaction">Reactive Compaction</h2>
-<p>When the context overflows — either detected before the LLM call or reported by the provider afterward — Swival runs up to four compaction levels in sequence.</p>
+<p>When the context overflows — either detected before the LLM call or reported by the provider afterward — Swival calls <code>compact_context()</code> with the structured request state: messages, tools, context length, output budget, provider details, summaries, and goal state. The function chooses the next useful strategy and returns the exact request shape to retry.</p>
 <h3 id="level-1-shrink-tool-results">Level 1: Shrink Tool Results</h3>
 <p>The gentlest approach. Old tool results (everything except the two most recent turns) are replaced with structured summaries.</p>
 <p>A file read becomes <code>[read_file: path, N lines — content compacted]</code>. A batched read becomes <code>[read_multiple_files: path1, path2, …, N chars — compacted]</code>. A grep becomes <code>[grep: 'pattern' in path, ~N matches — compacted]</code>. Command output keeps its first and last 200 characters.</p>
 <p>The agent retains all its turns and the structure of what it did. It loses the detailed content but keeps the metadata.</p>
-<h3 id="level-2-drop-low-importance-turns">Level 2: Drop Low-Importance Turns</h3>
+<h3 id="level-2-strip-reasoning-payloads">Level 2: Strip Reasoning Payloads</h3>
+<p>Some providers expose hidden or semi-hidden model reasoning in a <code>reasoning_content</code> field. That field can be useful for provider replay, but it is often not useful as prompt context and can be large. Swival now counts it in token estimates and strips it during compaction. Providers that require the field on historical tool-call assistant messages keep the minimal placeholder they need.</p>
+<p>Swival also compacts old visible assistant text that only led into a tool call, replacing long "reasoning before tool use" prose with a short marker.</p>
+<h3 id="level-3-drop-low-importance-turns">Level 3: Drop Low-Importance Turns</h3>
 <p>If shrinking results wasn't enough, Swival starts dropping entire turns from the middle of the conversation. Not all turns are equal — each one gets an importance score:</p>
 <ul>
 <li>Turns containing errors or failures score higher (the agent needs to remember what went wrong).</li>
@@ -158,13 +161,14 @@
 </ul>
 <p>The top half by score is kept. The bottom half is dropped and replaced with a summary generated by the LLM. That summary is prefixed with a marker that tells the model it's a factual recap, not a set of new instructions.</p>
 <p>User messages are never silently dropped at this level. Only agent and tool turns are candidates for removal.</p>
-<h3 id="level-3-nuclear-drop">Level 3: Nuclear Drop</h3>
-<p>Last resort. Everything in the middle is dropped — including user messages. Only the system prompt, a summary of what was lost, and the last two turns survive.</p>
+<h3 id="level-4-aggressive-drop">Level 4: Aggressive Drop</h3>
+<p>Aggressive message compaction. Everything in the middle is dropped — including user messages. Only the system prompt, a summary of what was lost, and the last two turns survive.</p>
 <p>If the LLM summary fails, Swival falls back to checkpoint summaries (if proactive summaries are enabled) or a static splice marker.</p>
 <p>After any compaction level, the agent retries the LLM call.</p>
-<h3 id="level-4-drop-tools">Level 4: Drop Tools</h3>
-<p>If all three message compaction levels fail — typically on models with very small context windows (4K or less) — Swival drops all tool schemas from the request and truncates the system prompt to fit the remaining budget. The model loses its ability to call tools and becomes a plain chatbot, but it can at least produce a text answer instead of aborting.</p>
-<p>If even this fails, the run is aborted with an error.</p>
+<h3 id="level-5-drop-tools-for-one-retry">Level 5: Drop Tools For One Retry</h3>
+<p>If message compaction fails and tool schemas are still attached, Swival drops all tool schemas from that retry request. This is deliberately request-local: the durable tool list is not mutated, so a later turn can restore tools immediately. Permanent no-tools mode is reserved for providers that actually raise <code>ToolsNotSupportedError</code>.</p>
+<h3 id="level-6-emergency-truncation">Level 6: Emergency Truncation</h3>
+<p>If the provider still rejects the request, Swival progressively emergency-truncates the remaining prompt at bounded ratios. It preserves the system prompt when possible and only truncates it in the final "make anything fit" stage. If even the smallest bounded request fails, the run writes a continue-here file and raises a context overflow error.</p>
 <h2 id="knowledge-survival">Knowledge Survival</h2>
 <p>The most important design principle: critical state must survive compaction. Three mechanisms ensure this.</p>
 <h3 id="thinking-state">Thinking State</h3>
@@ -180,12 +184,12 @@
 <p>Continue-here files are capped at 4,000 characters. Files older than 24 hours trigger a staleness warning but are still loaded. Use <code>--no-continue</code> to disable both writing and reading. The <code>/status</code> command includes continue file presence in its session overview.</p>
 <p>Together, these four channels mean that even after nuclear compaction wipes the conversation to nearly nothing, the agent still has its reasoning chain, its task list, a record of what it learned during investigation, and — if the session was interrupted — a structured resume plan for the next run.</p>
 <h2 id="proactive-checkpoint-summaries">Proactive Checkpoint Summaries</h2>
-<p>Enabled with <code>--proactive-summaries</code>, this feature periodically summarizes recent turns in the background. Every 10 turns, the last batch is summarized via an LLM call and stored internally.</p>
+<p>Enabled with <code>--proactive-summaries</code>, this feature periodically summarizes recent turns after agent turns. Every 10 turns, the last batch is summarized via an LLM call and stored internally.</p>
 <p>These summaries serve as a safety net. When Level 2 or Level 3 compaction fires and can't get an LLM summary of the dropped turns, it falls back to these pre-computed checkpoint summaries instead of losing the context entirely.</p>
 <p>To prevent the checkpoint store from growing without bound, older summaries are periodically consolidated: the oldest half is merged into a single summary, creating a hierarchical map/reduce structure. The total is capped at roughly 2,000 tokens.</p>
 <h2 id="commands">Commands</h2>
 <p>Swival exposes manual controls for context management as input commands. These work in interactive mode and in one-shot mode when <code>--oneshot-commands</code> is set.</p>
-<p><code>/compact</code> triggers Level 1 compaction (shrink tool results). <code>/compact --drop</code> also triggers Level 2 (drop low-importance turns). Both report how many tokens were saved.</p>
+<p><code>/compact</code> triggers Level 1 compaction (shrink tool results). <code>/compact --drop</code> also triggers turn dropping through the same structured compaction entrypoint. Both report how many tokens were saved.</p>
 <p><code>/save [label]</code> sets a snapshot checkpoint at the current position. <code>/restore</code> generates a summary via LLM and collapses everything since the checkpoint. <code>/unsave</code> cancels the checkpoint. These are the manual equivalents of the agent's <code>snapshot</code> tool.</p>
 <p><code>/clear</code> drops everything and resets all internal state — conversation, thinking, todos, snapshots, and file tracking.</p>
 <p>For the full command reference, see <a href="usage.html">Usage</a>.</p>

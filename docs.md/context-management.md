@@ -12,7 +12,7 @@ Swival's context management operates as four concentric layers of defense.
 
 **Layer 2 — Proactive collapse.** The agent can actively manage its own context using the `snapshot` tool. After reading several files to understand a problem, the agent calls `snapshot restore` with a summary of what it learned. The file reads — often 10K+ tokens of dead weight — are replaced with a ~200 token summary. The agent keeps the knowledge; the context gets the space back.
 
-**Layer 3 — Reactive compaction.** When the context fills up despite prevention and proactive collapse, Swival runs a graduated compaction pipeline. It starts gentle (shrinking old tool results), escalates if needed (dropping low-importance turns with the last 3 turns protected), and has a last-resort nuclear option (keeping only the system prompt, a summary, and the last 2 turns). Each level is tried in sequence, and the agent only moves to the next if the previous wasn't enough.
+**Layer 3 — Reactive compaction.** When the context fills up despite prevention and proactive collapse, Swival sends the structured prompt context through a single compaction entrypoint. It starts gentle (shrinking old tool results and prompt-only reasoning payloads), escalates if needed (dropping low-importance turns with the last 3 turns protected), and only drops tools or truncates system instructions as last resorts. Each retry uses the smallest request shape that is likely to fit, and temporary tool removal is restored on later turns.
 
 **Layer 4 — Knowledge survival.** Thinking notes, todo lists, and snapshot summaries live outside the message history in independent channels that compaction cannot touch. Even after the most aggressive compaction wipes nearly everything, the agent still knows its reasoning, its task list, and what it learned during investigation.
 
@@ -70,7 +70,7 @@ After 5 consecutive turns of read-only work (reading files, grepping, thinking),
 
 ## Reactive Compaction
 
-When the context overflows — either detected before the LLM call or reported by the provider afterward — Swival runs up to four compaction levels in sequence.
+When the context overflows — either detected before the LLM call or reported by the provider afterward — Swival calls `compact_context()` with the structured request state: messages, tools, context length, output budget, provider details, summaries, and goal state. The function chooses the next useful strategy and returns the exact request shape to retry.
 
 ### Level 1: Shrink Tool Results
 
@@ -80,7 +80,13 @@ A file read becomes `[read_file: path, N lines — content compacted]`. A batche
 
 The agent retains all its turns and the structure of what it did. It loses the detailed content but keeps the metadata.
 
-### Level 2: Drop Low-Importance Turns
+### Level 2: Strip Reasoning Payloads
+
+Some providers expose hidden or semi-hidden model reasoning in a `reasoning_content` field. That field can be useful for provider replay, but it is often not useful as prompt context and can be large. Swival now counts it in token estimates and strips it during compaction. Providers that require the field on historical tool-call assistant messages keep the minimal placeholder they need.
+
+Swival also compacts old visible assistant text that only led into a tool call, replacing long "reasoning before tool use" prose with a short marker.
+
+### Level 3: Drop Low-Importance Turns
 
 If shrinking results wasn't enough, Swival starts dropping entire turns from the middle of the conversation. Not all turns are equal — each one gets an importance score:
 
@@ -93,19 +99,21 @@ The top half by score is kept. The bottom half is dropped and replaced with a su
 
 User messages are never silently dropped at this level. Only agent and tool turns are candidates for removal.
 
-### Level 3: Nuclear Drop
+### Level 4: Aggressive Drop
 
-Last resort. Everything in the middle is dropped — including user messages. Only the system prompt, a summary of what was lost, and the last two turns survive.
+Aggressive message compaction. Everything in the middle is dropped — including user messages. Only the system prompt, a summary of what was lost, and the last two turns survive.
 
 If the LLM summary fails, Swival falls back to checkpoint summaries (if proactive summaries are enabled) or a static splice marker.
 
 After any compaction level, the agent retries the LLM call.
 
-### Level 4: Drop Tools
+### Level 5: Drop Tools For One Retry
 
-If all three message compaction levels fail — typically on models with very small context windows (4K or less) — Swival drops all tool schemas from the request and truncates the system prompt to fit the remaining budget. The model loses its ability to call tools and becomes a plain chatbot, but it can at least produce a text answer instead of aborting.
+If message compaction fails and tool schemas are still attached, Swival drops all tool schemas from that retry request. This is deliberately request-local: the durable tool list is not mutated, so a later turn can restore tools immediately. Permanent no-tools mode is reserved for providers that actually raise `ToolsNotSupportedError`.
 
-If even this fails, the run is aborted with an error.
+### Level 6: Emergency Truncation
+
+If the provider still rejects the request, Swival progressively emergency-truncates the remaining prompt at bounded ratios. It preserves the system prompt when possible and only truncates it in the final "make anything fit" stage. If even the smallest bounded request fails, the run writes a continue-here file and raises a context overflow error.
 
 ## Knowledge Survival
 
@@ -137,7 +145,7 @@ Together, these four channels mean that even after nuclear compaction wipes the 
 
 ## Proactive Checkpoint Summaries
 
-Enabled with `--proactive-summaries`, this feature periodically summarizes recent turns in the background. Every 10 turns, the last batch is summarized via an LLM call and stored internally.
+Enabled with `--proactive-summaries`, this feature periodically summarizes recent turns after agent turns. Every 10 turns, the last batch is summarized via an LLM call and stored internally.
 
 These summaries serve as a safety net. When Level 2 or Level 3 compaction fires and can't get an LLM summary of the dropped turns, it falls back to these pre-computed checkpoint summaries instead of losing the context entirely.
 
@@ -147,7 +155,7 @@ To prevent the checkpoint store from growing without bound, older summaries are 
 
 Swival exposes manual controls for context management as input commands. These work in interactive mode and in one-shot mode when `--oneshot-commands` is set.
 
-`/compact` triggers Level 1 compaction (shrink tool results). `/compact --drop` also triggers Level 2 (drop low-importance turns). Both report how many tokens were saved.
+`/compact` triggers Level 1 compaction (shrink tool results). `/compact --drop` also triggers turn dropping through the same structured compaction entrypoint. Both report how many tokens were saved.
 
 `/save [label]` sets a snapshot checkpoint at the current position. `/restore` generates a summary via LLM and collapses everything since the checkpoint. `/unsave` cancels the checkpoint. These are the manual equivalents of the agent's `snapshot` tool.
 

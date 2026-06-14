@@ -1768,6 +1768,9 @@ def estimate_tokens(messages: list, tools: list | None = None) -> int:
                 elif isinstance(tc, dict):
                     fn = tc.get("function", {})
                     content += fn.get("name", "") + (fn.get("arguments", "") or "")
+        reasoning_content = _msg_get(m, "reasoning_content")
+        if reasoning_content:
+            content += str(reasoning_content)
         total += len(_encoder.encode(content))
     total += _estimate_tool_tokens(tools)
     # Per-message overhead (role, separators) — ~4 tokens each
@@ -2456,6 +2459,317 @@ def _emergency_truncate(messages: list, context_length: int) -> list:
             break
 
     return messages
+
+
+COMPACTION_COMPACT_MESSAGES = "compact_messages"
+COMPACTION_STRIP_REASONING = "strip_reasoning_content"
+COMPACTION_DROP_MIDDLE = "drop_middle_turns"
+COMPACTION_AGGRESSIVE = "aggressive_drop"
+COMPACTION_DROP_TOOLS = "drop_tools"
+COMPACTION_EMERGENCY = "emergency_truncate"
+
+_COMPACTION_ORDER = (
+    COMPACTION_COMPACT_MESSAGES,
+    COMPACTION_STRIP_REASONING,
+    COMPACTION_DROP_MIDDLE,
+    COMPACTION_AGGRESSIVE,
+    COMPACTION_DROP_TOOLS,
+    COMPACTION_EMERGENCY,
+)
+
+_MAX_CONTEXT_COMPACTION_ATTEMPTS = 10
+_EMERGENCY_TRUNCATE_RATIOS = (1.0, 0.5, 0.25, 0.1)
+
+
+@dataclass
+class CompactionContext:
+    """Structured input for context compaction.
+
+    ``messages`` is the durable conversation state and may be mutated by
+    history compaction strategies. ``tools`` is the tool schema list proposed
+    for the next provider request; drop-tools compaction returns ``tools=None``
+    without mutating this field so later turns can restore tools immediately.
+    """
+
+    messages: list
+    tools: list | None
+    context_length: int | None
+    max_output_tokens: int | None
+    attempted_strategies: tuple[str, ...] = ()
+    requested_strategy: str | None = None
+    allow_tool_drop: bool = True
+    call_llm_fn: Callable | None = None
+    model_id: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    top_p: float | None = None
+    seed: int | None = None
+    provider: str | None = None
+    compaction_state: "CompactionState | None" = None
+    goal_state: "GoalState | None" = None
+    provider_kwargs: dict | None = None
+
+
+@dataclass
+class CompactionResult:
+    """Result of a single compaction step."""
+
+    messages: list
+    tools: list | None
+    strategy: str
+    description: str
+    tokens_before: int
+    tokens_after: int
+    history_mutated: bool = True
+    dropped_tools: bool = False
+
+
+def _delete_msg_key(msg, key: str) -> None:
+    if isinstance(msg, dict):
+        msg.pop(key, None)
+    elif hasattr(msg, key):
+        setattr(msg, key, None)
+
+
+def _set_msg_key(msg, key: str, value) -> None:
+    if isinstance(msg, dict):
+        msg[key] = value
+    else:
+        setattr(msg, key, value)
+
+
+def _has_reasoning_payload(messages: list) -> bool:
+    return any(_msg_get(m, "reasoning_content") for m in messages)
+
+
+def _messages_compaction_signature(messages: list) -> tuple:
+    """Cheap-ish signature for whether compaction changed prompt history."""
+    signature = []
+    for msg in messages:
+        tool_calls = _msg_tool_calls(msg) or []
+        tc_sig = []
+        for tc in tool_calls:
+            fn = tc.function if hasattr(tc, "function") else tc.get("function", {})
+            name = fn.name if hasattr(fn, "name") else fn.get("name", "")
+            args = fn.arguments if hasattr(fn, "arguments") else fn.get("arguments", "")
+            tc_sig.append((_tool_call_id(tc), name, args))
+        signature.append(
+            (
+                _msg_role(msg),
+                _msg_tool_call_id(msg),
+                _msg_name(msg),
+                _msg_content(msg),
+                _msg_get(msg, "reasoning_content"),
+                tuple(tc_sig),
+            )
+        )
+    return tuple(signature)
+
+
+def _compact_assistant_tool_reasoning(messages: list) -> bool:
+    """Shrink old visible assistant reasoning that only led into tool calls."""
+    changed = False
+    turns = group_into_turns(messages)
+    cutoff = max(0, len(turns) - 2)
+    for turn in turns[:cutoff]:
+        for msg in turn:
+            if _msg_role(msg) != "assistant" or not _msg_tool_calls(msg):
+                continue
+            content = _msg_content(msg)
+            if len(content) <= 1000:
+                continue
+            names = []
+            for tc in _msg_tool_calls(msg) or []:
+                fn = tc.function if hasattr(tc, "function") else tc.get("function", {})
+                name = fn.name if hasattr(fn, "name") else fn.get("name", "")
+                if name:
+                    names.append(name)
+            label = ", ".join(names) if names else "tool call"
+            _set_msg_content(
+                msg,
+                f"[assistant reasoning before {label} compacted]",
+            )
+            changed = True
+    return changed
+
+
+def _strip_reasoning_content_for_compaction(
+    messages: list,
+    *,
+    preserve_tool_placeholders: bool,
+) -> bool:
+    """Remove replayed reasoning payloads that inflate provider prompts.
+
+    For providers that require ``reasoning_content`` on historical tool-call
+    assistant messages, keep the minimal placeholder accepted elsewhere in the
+    provider-routing code.
+    """
+    changed = False
+    for msg in messages:
+        if _msg_role(msg) != "assistant":
+            continue
+        reasoning = _msg_get(msg, "reasoning_content")
+        if not reasoning:
+            continue
+        if preserve_tool_placeholders and _msg_tool_calls(msg):
+            if reasoning != " ":
+                _set_msg_key(msg, "reasoning_content", " ")
+                changed = True
+        else:
+            _delete_msg_key(msg, "reasoning_content")
+            changed = True
+    return changed
+
+
+def _compact_reasoning_payloads(
+    messages: list,
+    *,
+    model_id: str | None,
+    base_url: str | None,
+) -> bool:
+    preserve_tool_placeholders = _needs_reasoning_content(model_id or "", base_url)
+    changed = _strip_reasoning_content_for_compaction(
+        messages,
+        preserve_tool_placeholders=preserve_tool_placeholders,
+    )
+    return _compact_assistant_tool_reasoning(messages) or changed
+
+
+def _compaction_strategy_candidates(ctx: CompactionContext):
+    if ctx.requested_strategy:
+        yield ctx.requested_strategy
+        return
+
+    attempted = set(ctx.attempted_strategies)
+    for strategy in _COMPACTION_ORDER:
+        if strategy == COMPACTION_EMERGENCY:
+            continue
+        if strategy in attempted:
+            continue
+        if strategy == COMPACTION_STRIP_REASONING and not _has_reasoning_payload(
+            ctx.messages
+        ):
+            # Visible assistant tool-call reasoning may still be compactable
+            # even when there is no provider reasoning_content field.
+            if not any(
+                _msg_role(m) == "assistant"
+                and _msg_tool_calls(m)
+                and len(_msg_content(m)) > 1000
+                for m in ctx.messages
+            ):
+                continue
+        if strategy == COMPACTION_DROP_TOOLS and (
+            not ctx.allow_tool_drop or ctx.tools is None
+        ):
+            continue
+        yield strategy
+
+    if ctx.attempted_strategies.count(COMPACTION_EMERGENCY) < len(
+        _EMERGENCY_TRUNCATE_RATIOS
+    ):
+        yield COMPACTION_EMERGENCY
+
+
+def _emergency_context_target(ctx: CompactionContext) -> int:
+    base = ctx.context_length
+    if base is None:
+        base = max(estimate_tokens(ctx.messages, None), MIN_OUTPUT_TOKENS * 4)
+    emergency_count = ctx.attempted_strategies.count(COMPACTION_EMERGENCY)
+    ratio = _EMERGENCY_TRUNCATE_RATIOS[
+        min(emergency_count, len(_EMERGENCY_TRUNCATE_RATIOS) - 1)
+    ]
+    return max(int(base * ratio), MIN_OUTPUT_TOKENS * 4)
+
+
+def compact_context(ctx: CompactionContext) -> CompactionResult:
+    """Compact the structured prompt context for the next LLM request.
+
+    This is the single entrypoint for reactive and manual compaction. It picks
+    the next useful strategy, mutates durable history only for history
+    strategies, and treats dropping tools as a temporary request-level fallback.
+    """
+    for strategy in _compaction_strategy_candidates(ctx):
+        before = estimate_tokens(ctx.messages, ctx.tools)
+        before_signature = _messages_compaction_signature(ctx.messages)
+        retry_tools = ctx.tools
+        dropped_tools = False
+        description = strategy
+
+        if strategy == COMPACTION_COMPACT_MESSAGES:
+            ctx.messages[:] = compact_messages(ctx.messages)
+            description = "compacted large tool results"
+        elif strategy == COMPACTION_STRIP_REASONING:
+            _compact_reasoning_payloads(
+                ctx.messages,
+                model_id=ctx.model_id,
+                base_url=ctx.base_url,
+            )
+            description = "stripped replayed reasoning payloads"
+        elif strategy == COMPACTION_DROP_MIDDLE:
+            ctx.messages[:] = drop_middle_turns(
+                ctx.messages,
+                call_llm_fn=ctx.call_llm_fn,
+                model_id=ctx.model_id,
+                base_url=ctx.base_url,
+                api_key=ctx.api_key,
+                top_p=ctx.top_p,
+                seed=ctx.seed,
+                provider=ctx.provider,
+                compaction_state=ctx.compaction_state,
+                goal_state=ctx.goal_state,
+                provider_kwargs=ctx.provider_kwargs,
+            )
+            description = "dropped low-importance middle turns"
+        elif strategy == COMPACTION_AGGRESSIVE:
+            ctx.messages[:] = aggressive_drop_turns(
+                ctx.messages,
+                call_llm_fn=ctx.call_llm_fn,
+                model_id=ctx.model_id,
+                base_url=ctx.base_url,
+                api_key=ctx.api_key,
+                top_p=ctx.top_p,
+                seed=ctx.seed,
+                provider=ctx.provider,
+                compaction_state=ctx.compaction_state,
+                goal_state=ctx.goal_state,
+                provider_kwargs=ctx.provider_kwargs,
+            )
+            description = "aggressively compacted conversation history"
+        elif strategy == COMPACTION_DROP_TOOLS:
+            retry_tools = None
+            dropped_tools = True
+            description = "dropped tool schemas for this retry"
+        elif strategy == COMPACTION_EMERGENCY:
+            if ctx.allow_tool_drop and ctx.tools is not None:
+                retry_tools = None
+                dropped_tools = True
+            _emergency_truncate(ctx.messages, _emergency_context_target(ctx))
+            description = "emergency-truncated remaining context"
+        else:
+            raise ValueError(f"unknown compaction strategy: {strategy}")
+
+        after = estimate_tokens(ctx.messages, retry_tools)
+        history_mutated = (
+            _messages_compaction_signature(ctx.messages) != before_signature
+        )
+        if (
+            ctx.requested_strategy
+            or strategy in (COMPACTION_DROP_TOOLS, COMPACTION_EMERGENCY)
+            or after < before
+            or history_mutated
+        ):
+            return CompactionResult(
+                messages=ctx.messages,
+                tools=retry_tools,
+                strategy=strategy,
+                description=description,
+                tokens_before=before,
+                tokens_after=after,
+                history_mutated=history_mutated,
+                dropped_tools=dropped_tools,
+            )
+
+    raise ContextOverflowError("no compaction strategy available")
 
 
 def _provider_auth_kwargs(llm_kwargs):
@@ -8487,6 +8801,7 @@ def run_agent_loop(
                 t for t in tools if t.get("function", {}).get("name") != "view_image"
             ]
     effective_tools = None if provider == "command" else tools
+    _last_request_tools = effective_tools
 
     # Build command_tool_kwargs for command provider tool-calling support
     _command_tool_schemas = (
@@ -8773,10 +9088,6 @@ def run_agent_loop(
                     **_tools_retry_kwargs(_is_tools_retry),
                 )
 
-            # --- Graduated compaction levels ---
-            # Each level is tried in order. If the LLM call succeeds after
-            # a compaction step, we break out. If it still overflows, we
-            # try the next level. If all levels fail, raise AgentError.
             _llm_summary_kwargs = dict(
                 call_llm_fn=_call_llm_for_secondary,
                 model_id=model_id,
@@ -8788,66 +9099,74 @@ def run_agent_loop(
                 compaction_state=compaction_state,
                 provider_kwargs=_provider_auth_kwargs(llm_kwargs),
             )
-            compaction_levels = [
-                (
-                    "compact_messages",
-                    "compacting tool results...",
-                    lambda: compact_messages(messages),
-                ),
-                (
-                    "drop_middle_turns",
-                    "dropping low-importance turns...",
-                    lambda: drop_middle_turns(
-                        messages, goal_state=goal_state, **_llm_summary_kwargs
-                    ),
-                ),
-                (
-                    "aggressive_drop",
-                    "aggressive compaction (last resort)...",
-                    lambda: aggressive_drop_turns(
-                        messages, goal_state=goal_state, **_llm_summary_kwargs
-                    ),
-                ),
-            ]
 
             _tne_pending = None
-            for level_name, level_desc, compact_fn in compaction_levels:
-                if verbose:
-                    fmt.warning(f"context window exceeded, {level_desc}")
-                # If an image was just injected, replace it with an
-                # explanatory fallback before compaction strips the data
-                # silently.  This way the model knows analysis was dropped.
-                if _vision_pending:
-                    _replace_last_image_message(
-                        messages,
-                        _IMAGE_SYNTHETIC_PREFIX
-                        + " The image was dropped during context compaction "
-                        "and could not be analyzed. Inform the user that the "
-                        "image could not be processed due to context limits.",
-                    )
-                    _vision_pending = False
-                tokens_before = estimate_tokens(messages, effective_tools)
-                messages[:] = compact_fn()
-                if snapshot_state is not None:
-                    snapshot_state.invalidate_index_checkpoint()
+            _compaction_success = False
+            _attempted_strategies: list[str] = []
+
+            if _vision_pending:
+                _replace_last_image_message(
+                    messages,
+                    _IMAGE_SYNTHETIC_PREFIX
+                    + " The image was dropped during context compaction "
+                    "and could not be analyzed. Inform the user that the "
+                    "image could not be processed due to context limits.",
+                )
+                _vision_pending = False
+
+            for _ in range(_MAX_CONTEXT_COMPACTION_ATTEMPTS):
                 try:
-                    effective_max_output = clamp_output_tokens(
-                        messages, effective_tools, context_length, max_output_tokens
+                    compaction = compact_context(
+                        CompactionContext(
+                            messages=messages,
+                            tools=effective_tools,
+                            context_length=context_length,
+                            max_output_tokens=max_output_tokens,
+                            attempted_strategies=tuple(_attempted_strategies),
+                            goal_state=goal_state,
+                            **_llm_summary_kwargs,
+                        )
                     )
                 except ContextOverflowError:
-                    tokens_after = estimate_tokens(messages, effective_tools)
-                    if report:
-                        report.record_compaction(
-                            turns + turn_offset, level_name, tokens_before, tokens_after
-                        )
-                    continue  # try next compaction level
-                tokens_after = estimate_tokens(messages, effective_tools)
-                if report:
-                    report.record_compaction(
-                        turns + turn_offset, level_name, tokens_before, tokens_after
-                    )
+                    break
+
+                _attempted_strategies.append(compaction.strategy)
+                retry_tools = compaction.tools
+
                 if verbose:
-                    fmt.context_stats(f"Context after {level_name}", tokens_after)
+                    if compaction.dropped_tools:
+                        fmt.warning(
+                            "context window exceeded after message compaction, "
+                            "dropping tools for this retry"
+                        )
+                    else:
+                        fmt.warning(
+                            f"context window exceeded, {compaction.description}..."
+                        )
+
+                if compaction.history_mutated and snapshot_state is not None:
+                    snapshot_state.invalidate_index_checkpoint()
+
+                if report and compaction.history_mutated:
+                    report.record_compaction(
+                        turns + turn_offset,
+                        compaction.strategy,
+                        compaction.tokens_before,
+                        compaction.tokens_after,
+                    )
+
+                if verbose:
+                    fmt.context_stats(
+                        f"Context after {compaction.strategy}",
+                        compaction.tokens_after,
+                    )
+
+                try:
+                    effective_max_output = clamp_output_tokens(
+                        messages, retry_tools, context_length, max_output_tokens
+                    )
+                except ContextOverflowError:
+                    continue
 
                 _llm_args = (
                     api_base,
@@ -8857,7 +9176,7 @@ def run_agent_loop(
                     temperature,
                     top_p,
                     seed,
-                    effective_tools,
+                    retry_tools,
                     verbose,
                 )
                 t0 = time.monotonic()
@@ -8897,7 +9216,7 @@ def run_agent_loop(
                             turn=turns + turn_offset,
                             report=report,
                             verbose=verbose,
-                            where=f"post-{level_name}",
+                            where=f"post-{compaction.strategy}",
                         )
                 except ContextOverflowError as _coe:
                     elapsed = time.monotonic() - t0
@@ -8905,13 +9224,13 @@ def run_agent_loop(
                         report.record_llm_call(
                             turns + turn_offset,
                             elapsed,
-                            tokens_after,
+                            compaction.tokens_after,
                             "context_overflow",
                             is_retry=True,
-                            retry_reason=level_name,
+                            retry_reason=compaction.strategy,
                             provider_retries=getattr(_coe, "_provider_retries", 0),
                         )
-                    continue  # try next level
+                    continue
                 except AgentError as _ae:
                     if isinstance(_ae, ToolsNotSupportedError):
                         _tne_pending = _ae
@@ -8921,14 +9240,15 @@ def run_agent_loop(
                         report.record_llm_call(
                             turns + turn_offset,
                             elapsed,
-                            tokens_after,
+                            compaction.tokens_after,
                             "error",
                             is_retry=True,
-                            retry_reason=level_name,
+                            retry_reason=compaction.strategy,
                             provider_retries=getattr(_ae, "_provider_retries", 0),
                         )
                     raise
                 else:
+                    _last_request_tools = retry_tools
                     elapsed = time.monotonic() - t0
                     if verbose:
                         fmt.llm_timing(elapsed, finish_reason)
@@ -8936,265 +9256,33 @@ def run_agent_loop(
                         report.record_llm_call(
                             turns + turn_offset,
                             elapsed,
-                            tokens_after,
+                            compaction.tokens_after,
                             finish_reason,
                             is_retry=True,
-                            retry_reason=level_name,
+                            retry_reason=compaction.strategy,
                             provider_retries=_provider_retries,
                             cached_tokens=_cache_stats[0],
                             cache_write_tokens=_cache_stats[1],
                         )
-                    _account_goal_usage(tokens_after, _cache_stats, elapsed)
-                    break  # success
-            else:
-                # All compaction levels exhausted.  Last resort: if we still
-                # have tools attached, drop them entirely and retry as a plain
-                # chat completion.  The model loses all tool-calling ability
-                # but can at least produce a text answer.
-                _drop_tools_ok = False
-                _had_tools = effective_tools is not None
-                if _had_tools:
-                    fmt.warning(
-                        "context window exceeded even after compaction — "
-                        "dropping all tools and retrying as plain chat"
-                    )
-                    effective_tools = None
-                # Truncate a bloated system prompt so the user's
-                # actual question can fit in the remaining context.
-                if context_length and messages and _msg_role(messages[0]) == "system":
-                    sys_content = _msg_content(messages[0]) or ""
-                    max_sys_chars = context_length  # ~1 token/char, generous
-                    if len(sys_content) > max_sys_chars:
-                        _set_msg_content(
-                            messages[0],
-                            sys_content[:max_sys_chars]
-                            + "\n\n[system prompt truncated to fit context window]",
-                        )
-                _output_budgets = []
-                try:
-                    _output_budgets.append(
-                        clamp_output_tokens(
-                            messages, None, context_length, max_output_tokens
-                        )
-                    )
-                except ContextOverflowError:
-                    pass
-                if not _output_budgets and context_length is not None:
-                    fmt.warning(
-                        "prompt still exceeds context window — "
-                        "emergency truncation of remaining messages"
-                    )
-                    _emergency_truncate(messages, context_length)
-                    if snapshot_state:
-                        snapshot_state.invalidate_index_checkpoint()
-                    try:
-                        _output_budgets.append(
-                            clamp_output_tokens(
-                                messages, None, context_length, max_output_tokens
-                            )
-                        )
-                    except ContextOverflowError:
-                        pass
-                if not _output_budgets and context_length is None:
-                    budget = max_output_tokens
-                    while budget >= MIN_OUTPUT_TOKENS:
-                        budget //= 2
-                        if budget >= MIN_OUTPUT_TOKENS:
-                            _output_budgets.append(budget)
-                for _try_max_output in _output_budgets:
-                    _llm_args = (
-                        api_base,
-                        model_id,
+                    _account_goal_usage(compaction.tokens_after, _cache_stats, elapsed)
+                    _compaction_success = True
+                    break
+
+            if not _compaction_success and _tne_pending is None:
+                if continue_here:
+                    from .continue_here import write_continue_file
+
+                    write_continue_file(
+                        base_dir,
                         messages,
-                        _try_max_output,
-                        temperature,
-                        top_p,
-                        seed,
-                        None,
-                        verbose,
+                        todo_state=todo_state,
+                        snapshot_state=snapshot_state,
+                        thinking_state=thinking_state,
+                        goal_state=goal_state,
                     )
-                    t0 = time.monotonic()
-                    try:
-                        with (
-                            fmt.llm_spinner(
-                                f"Thinking (turn {turns}/{max_turns}, no tools)"
-                            )
-                            if verbose
-                            else nullcontext()
-                        ) as _dismiss_waiting:
-                            _llm_result = _call_llm_with_dismiss(
-                                _dismiss_waiting, _llm_args, **llm_kwargs
-                            )
-                            msg, finish_reason = _llm_result[0], _llm_result[1]
-                            cmd_activity = (
-                                _llm_result[2] if len(_llm_result) > 2 else []
-                            )
-                            _provider_retries = (
-                                _llm_result[3] if len(_llm_result) > 3 else 0
-                            )
-                            _cache_stats = (
-                                _llm_result[4] if len(_llm_result) > 4 else (0, 0)
-                            )
-                            _maybe_scavenge_tool_calls(
-                                msg,
-                                finish_reason,
-                                tools,
-                                turn=turns + turn_offset,
-                                report=report,
-                                verbose=verbose,
-                            )
-                            _raise_if_truncated_tool_call(
-                                msg,
-                                finish_reason,
-                                provider_retries=_provider_retries,
-                                turn=turns + turn_offset,
-                                report=report,
-                                verbose=verbose,
-                                where="post-drop-tools",
-                            )
-                    except ContextOverflowError:
-                        continue
-                    else:
-                        elapsed = time.monotonic() - t0
-                        if verbose:
-                            fmt.llm_timing(elapsed, finish_reason)
-                        _post_drop_tokens = estimate_tokens(messages, None)
-                        if report:
-                            report.record_llm_call(
-                                turns + turn_offset,
-                                elapsed,
-                                _post_drop_tokens,
-                                finish_reason,
-                                is_retry=True,
-                                retry_reason="drop_tools",
-                                provider_retries=_provider_retries,
-                                cached_tokens=_cache_stats[0],
-                                cache_write_tokens=_cache_stats[1],
-                            )
-                        _account_goal_usage(_post_drop_tokens, _cache_stats, elapsed)
-                        _drop_tools_ok = True
-                        break
-
-                if not _drop_tools_ok:
-                    # The server still rejects us even after dropping tools
-                    # and trying every clamped budget.  This usually means
-                    # our local token estimate (tiktoken cl100k_base) is
-                    # under-counting against the model's real tokenizer.
-                    # Progressively shrink the prompt with _emergency_truncate
-                    # at ever-tighter targets, retrying each time, before
-                    # giving up.
-                    _base_ctx = context_length or estimate_tokens(messages, None)
-                    if _base_ctx <= 0:
-                        _base_ctx = 4096
-                    for _ratio in (0.5, 0.25, 0.1):
-                        _target = max(int(_base_ctx * _ratio), MIN_OUTPUT_TOKENS * 4)
-                        if verbose:
-                            fmt.warning(
-                                f"server still rejects prompt — emergency "
-                                f"truncating to ~{_target} tokens and retrying"
-                            )
-                        _emergency_truncate(messages, _target)
-                        if snapshot_state is not None:
-                            snapshot_state.invalidate_index_checkpoint()
-                        try:
-                            _retry_budget = clamp_output_tokens(
-                                messages, None, context_length, max_output_tokens
-                            )
-                        except ContextOverflowError:
-                            _retry_budget = MIN_OUTPUT_TOKENS
-                        _llm_args = (
-                            api_base,
-                            model_id,
-                            messages,
-                            _retry_budget,
-                            temperature,
-                            top_p,
-                            seed,
-                            None,
-                            verbose,
-                        )
-                        t0 = time.monotonic()
-                        try:
-                            with (
-                                fmt.llm_spinner(
-                                    f"Thinking (turn {turns}/{max_turns}, truncated)"
-                                )
-                                if verbose
-                                else nullcontext()
-                            ) as _dismiss_waiting:
-                                _llm_result = _call_llm_with_dismiss(
-                                    _dismiss_waiting, _llm_args, **llm_kwargs
-                                )
-                                msg, finish_reason = (
-                                    _llm_result[0],
-                                    _llm_result[1],
-                                )
-                                cmd_activity = (
-                                    _llm_result[2] if len(_llm_result) > 2 else []
-                                )
-                                _provider_retries = (
-                                    _llm_result[3] if len(_llm_result) > 3 else 0
-                                )
-                                _cache_stats = (
-                                    _llm_result[4] if len(_llm_result) > 4 else (0, 0)
-                                )
-                                _maybe_scavenge_tool_calls(
-                                    msg,
-                                    finish_reason,
-                                    tools,
-                                    turn=turns + turn_offset,
-                                    report=report,
-                                    verbose=verbose,
-                                )
-                                _raise_if_truncated_tool_call(
-                                    msg,
-                                    finish_reason,
-                                    provider_retries=_provider_retries,
-                                    turn=turns + turn_offset,
-                                    report=report,
-                                    verbose=verbose,
-                                    where="post-emergency-truncate",
-                                )
-                        except ContextOverflowError:
-                            continue
-                        else:
-                            elapsed = time.monotonic() - t0
-                            if verbose:
-                                fmt.llm_timing(elapsed, finish_reason)
-                            _post_drop_tokens = estimate_tokens(messages, None)
-                            if report:
-                                report.record_llm_call(
-                                    turns + turn_offset,
-                                    elapsed,
-                                    _post_drop_tokens,
-                                    finish_reason,
-                                    is_retry=True,
-                                    retry_reason="emergency_truncate",
-                                    provider_retries=_provider_retries,
-                                    cached_tokens=_cache_stats[0],
-                                    cache_write_tokens=_cache_stats[1],
-                                )
-                            _account_goal_usage(
-                                _post_drop_tokens, _cache_stats, elapsed
-                            )
-                            _drop_tools_ok = True
-                            break
-
-                if not _drop_tools_ok:
-                    if continue_here:
-                        from .continue_here import write_continue_file
-
-                        write_continue_file(
-                            base_dir,
-                            messages,
-                            todo_state=todo_state,
-                            snapshot_state=snapshot_state,
-                            thinking_state=thinking_state,
-                            goal_state=goal_state,
-                        )
-                    raise ContextOverflowError(
-                        "context window exceeded even after compaction"
-                    )
+                raise ContextOverflowError(
+                    "context window exceeded even after compaction"
+                )
 
             if _tne_pending is not None:
                 _drop_tools(_tne_pending, time.monotonic() - t0, token_est)
@@ -9229,6 +9317,7 @@ def run_agent_loop(
                 )
             raise
         else:
+            _last_request_tools = effective_tools
             _vision_pending = False  # success — clear the flag
             elapsed = time.monotonic() - t0
             if verbose:
@@ -9261,7 +9350,7 @@ def run_agent_loop(
                     "content": (
                         "Your response was empty. Please continue working on "
                         "the task using the available tools."
-                        if effective_tools is not None
+                        if _last_request_tools is not None
                         else "Your response was empty. Please answer the question directly."
                     ),
                     "_swival_synthetic": True,
@@ -9326,7 +9415,7 @@ def run_agent_loop(
         if (
             not msg.tool_calls
             and finish_reason != "length"
-            and effective_tools is not None
+            and _last_request_tools is not None
         ):
             leak = _classify_textual_tool_call_leak(msg.content)
             if leak is not None:
@@ -9402,7 +9491,12 @@ def run_agent_loop(
                 messages.append(
                     {
                         "role": "user",
-                        "content": "Your response was cut off. Please use the provided tools to complete the task step by step.",
+                        "content": (
+                            "Your response was cut off. Please use the provided tools "
+                            "to complete the task step by step."
+                            if _last_request_tools is not None
+                            else "Your response was cut off. Please continue the answer directly."
+                        ),
                         "_swival_synthetic": True,
                     }
                 )
@@ -10641,10 +10735,28 @@ def _repl_compact(
 ) -> str:
     """Manually compact conversation context."""
     before = estimate_tokens(messages, tools)
-
-    messages[:] = compact_messages(messages)
+    compact_context(
+        CompactionContext(
+            messages=messages,
+            tools=tools,
+            context_length=context_length,
+            max_output_tokens=None,
+            requested_strategy=COMPACTION_COMPACT_MESSAGES,
+            allow_tool_drop=False,
+        )
+    )
     if arg.strip() == "--drop":
-        messages[:] = drop_middle_turns(messages, goal_state=goal_state)
+        compact_context(
+            CompactionContext(
+                messages=messages,
+                tools=tools,
+                context_length=context_length,
+                max_output_tokens=None,
+                requested_strategy=COMPACTION_DROP_MIDDLE,
+                allow_tool_drop=False,
+                goal_state=goal_state,
+            )
+        )
 
     if snapshot_state is not None:
         snapshot_state.invalidate_index_checkpoint()

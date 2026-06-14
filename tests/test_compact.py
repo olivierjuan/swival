@@ -15,6 +15,13 @@ from swival.agent import (
     score_turn,
     drop_middle_turns,
     aggressive_drop_turns,
+    compact_context,
+    CompactionContext,
+    COMPACTION_AGGRESSIVE,
+    COMPACTION_COMPACT_MESSAGES,
+    COMPACTION_DROP_MIDDLE,
+    COMPACTION_DROP_TOOLS,
+    COMPACTION_STRIP_REASONING,
     _emergency_truncate,
     summarize_turns,
     _RECAP_PREFIX,
@@ -77,6 +84,17 @@ class TestEstimateTokens:
         estimate_tokens(msgs_plain)
         count_tc = estimate_tokens(msgs_tc)
         assert count_tc > 4  # More than just per-message overhead
+
+    def test_includes_reasoning_content(self):
+        msgs_plain = [_assistant("hello")]
+        msgs_reasoning = [
+            {
+                "role": "assistant",
+                "content": "hello",
+                "reasoning_content": "internal scratch " * 200,
+            }
+        ]
+        assert estimate_tokens(msgs_reasoning) > estimate_tokens(msgs_plain)
 
     def test_tools_schema_counted(self):
         msgs = [_user("hi")]
@@ -204,6 +222,76 @@ class TestCompactMessages:
         tc_turn = [t for t in turns if len(t) > 1]
         assert len(tc_turn) == 1
         assert len(tc_turn[0]) == 3  # assistant + 2 tool results
+
+
+# ---------------------------------------------------------------------------
+# compact_context
+# ---------------------------------------------------------------------------
+
+
+class TestCompactContext:
+    def test_strips_reasoning_payloads(self):
+        tc = _assistant_tc([("tc1", "read_file", '{"file_path": "a.py"}')])
+        tc.reasoning_content = "thinking " * 1000
+        msgs = [_sys("s"), _user("q"), tc, _tool("tc1", "ok"), _assistant("done")]
+
+        result = compact_context(
+            CompactionContext(
+                messages=msgs,
+                tools=None,
+                context_length=10_000,
+                max_output_tokens=1000,
+                attempted_strategies=(COMPACTION_COMPACT_MESSAGES,),
+                model_id="generic-model",
+            )
+        )
+
+        assert result.strategy == COMPACTION_STRIP_REASONING
+        assert tc.reasoning_content is None
+        assert result.tokens_after < result.tokens_before
+
+    def test_keeps_required_reasoning_placeholder(self):
+        tc = _assistant_tc([("tc1", "read_file", '{"file_path": "a.py"}')])
+        tc.reasoning_content = "thinking " * 1000
+        msgs = [_sys("s"), _user("q"), tc, _tool("tc1", "ok"), _assistant("done")]
+
+        compact_context(
+            CompactionContext(
+                messages=msgs,
+                tools=None,
+                context_length=10_000,
+                max_output_tokens=1000,
+                attempted_strategies=(COMPACTION_COMPACT_MESSAGES,),
+                model_id="deepseek-v4",
+            )
+        )
+
+        assert tc.reasoning_content == " "
+
+    def test_drop_tools_is_request_local(self):
+        tools = [
+            {"type": "function", "function": {"name": "read_file", "parameters": {}}}
+        ]
+        msgs = [_sys("s"), _user("q")]
+
+        result = compact_context(
+            CompactionContext(
+                messages=msgs,
+                tools=tools,
+                context_length=100,
+                max_output_tokens=20,
+                attempted_strategies=(
+                    COMPACTION_COMPACT_MESSAGES,
+                    COMPACTION_DROP_MIDDLE,
+                    COMPACTION_AGGRESSIVE,
+                ),
+            )
+        )
+
+        assert result.strategy == COMPACTION_DROP_TOOLS
+        assert result.tools is None
+        assert tools
+        assert result.history_mutated is False
 
 
 # ---------------------------------------------------------------------------
@@ -1171,7 +1259,15 @@ class TestToolsNotSupportedLoop:
             )
 
         report = ReportCollector()
-        messages = [_sys("system"), _user("hello")]
+        tc = _assistant_tc([("tc1", "read_file", '{"file_path": "old.py"}')])
+        messages = [
+            _sys("system"),
+            _user("start"),
+            tc,
+            _tool("tc1", "x" * 5000),
+            _assistant("mid"),
+            _user("hello"),
+        ]
         with patch("swival.agent.call_llm", side_effect=fake_call_llm):
             answer, exhausted = run_agent_loop(
                 messages,
