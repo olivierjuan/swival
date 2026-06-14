@@ -2482,6 +2482,8 @@ _COMPACTION_ORDER = (
 _MAX_CONTEXT_COMPACTION_ATTEMPTS = 10
 _EMERGENCY_TRUNCATE_RATIOS = (1.0, 0.5, 0.25, 0.1)
 
+_TERMINAL_FLOOR_BUDGETS = (4096, 1024, 256)
+
 DEFAULT_COMPACTION_SAFETY_RATIO = 0.90
 PROACTIVE_COMPACTION_HYSTERESIS = 0.90
 REACTIVE_BUDGET_BACKOFF = 0.85
@@ -2981,6 +2983,117 @@ def compact_to_budget(
         dropped_tools=dropped_tools,
         met_budget=after <= budget,
     )
+
+
+@dataclass
+class TerminalAttemptResult:
+    """A successful terminal-floor retry, ready for the caller to commit.
+
+    The helper that produces this never mutates durable history or records any
+    stats; the agent loop commits ``working_messages`` and runs the visible
+    bookkeeping so success accounting stays adjacent to the reactive branch.
+    """
+
+    working_messages: list
+    msg: object
+    finish_reason: str
+    cmd_activity: list
+    provider_retries: int
+    cache_stats: tuple
+    elapsed: float
+    tokens_after: int
+    budget: int
+
+
+def _run_terminal_floor_ladder(
+    messages: list,
+    *,
+    api_base,
+    model_id,
+    temperature,
+    top_p,
+    seed,
+    verbose,
+    llm_kwargs,
+    tools=None,
+    turn=0,
+    report=None,
+    budgets=_TERMINAL_FLOOR_BUDGETS,
+) -> TerminalAttemptResult | None:
+    """Last-resort absolute-budget retries on the path that would otherwise stop.
+
+    The reactive ladder gives up when it can no longer shrink relative to the
+    current size, which leaves the unknown-context-window case without an
+    absolute backstop. This walks a few fixed prompt budgets, each on a fresh
+    deep copy truncated by :func:`_emergency_truncate`, with tools dropped and a
+    minimal output reservation so the request is as small as the conversation
+    can be made. It returns the first attempt the provider accepts, or ``None``
+    when even the smallest minimal prompt is rejected — that stop is honest.
+
+    The input ``messages`` is never mutated; the caller commits the surviving
+    copy. Only :class:`ContextOverflowError` advances to the next budget; any
+    other failure propagates, because a smaller prompt would not fix it.
+    """
+    base_kwargs = dict(llm_kwargs)
+    base_kwargs.pop("on_stream_start", None)
+    for budget in budgets:
+        working = copy.deepcopy(messages)
+        _emergency_truncate(working, budget)
+        if verbose:
+            fmt.warning(
+                f"context window exceeded after compaction; trying a minimal "
+                f"{budget}-token prompt with no tools"
+            )
+        llm_args = (
+            api_base,
+            model_id,
+            working,
+            MIN_OUTPUT_TOKENS,
+            temperature,
+            top_p,
+            seed,
+            None,
+            verbose,
+        )
+        t0 = time.monotonic()
+        try:
+            result = call_llm(*llm_args, **base_kwargs)
+            msg, finish_reason = result[0], result[1]
+            cmd_activity = result[2] if len(result) > 2 else []
+            provider_retries = result[3] if len(result) > 3 else 0
+            cache_stats = result[4] if len(result) > 4 else (0, 0)
+            _maybe_scavenge_tool_calls(
+                msg,
+                finish_reason,
+                tools,
+                turn=turn,
+                report=report,
+                verbose=verbose,
+            )
+            _raise_if_truncated_tool_call(
+                msg,
+                finish_reason,
+                provider_retries=provider_retries,
+                turn=turn,
+                report=report,
+                verbose=verbose,
+                where=f"post-terminal_floor:{budget}",
+            )
+        except ContextOverflowError:
+            continue
+        elapsed = time.monotonic() - t0
+        return TerminalAttemptResult(
+            working_messages=working,
+            msg=msg,
+            finish_reason=finish_reason,
+            cmd_activity=cmd_activity,
+            provider_retries=provider_retries,
+            cache_stats=cache_stats,
+            elapsed=elapsed,
+            tokens_after=estimate_tokens(working, None),
+            budget=budget,
+        )
+    return None
 
 
 def _provider_auth_kwargs(llm_kwargs):
@@ -9529,6 +9642,64 @@ def run_agent_loop(
                     break
 
             if not _compaction_success and _tne_pending is None:
+                # Absolute terminal floor. The reactive ladder shrinks only
+                # relative to the current size, so an unknown context window has
+                # no hard target to descend to. Try a few fixed minimal-prompt
+                # budgets (no tools, minimal output) before stopping. This sits
+                # on the path that otherwise always raises, so it can only turn
+                # a hard stop into a heavily truncated continuation. History is
+                # left pristine until a terminal retry actually succeeds, so the
+                # failure path still hands the full transcript to continue-here.
+                terminal = _run_terminal_floor_ladder(
+                    messages,
+                    api_base=api_base,
+                    model_id=model_id,
+                    temperature=temperature,
+                    top_p=top_p,
+                    seed=seed,
+                    verbose=verbose,
+                    llm_kwargs=llm_kwargs,
+                    tools=tools,
+                    turn=turns + turn_offset,
+                    report=report,
+                )
+                if terminal is not None:
+                    messages[:] = terminal.working_messages
+                    if snapshot_state is not None:
+                        snapshot_state.invalidate_index_checkpoint()
+                    msg = terminal.msg
+                    finish_reason = terminal.finish_reason
+                    cmd_activity = terminal.cmd_activity
+                    _provider_retries = terminal.provider_retries
+                    _cache_stats = terminal.cache_stats
+                    _last_request_tools = None
+                    if verbose:
+                        fmt.warning(
+                            "recovered with a minimal "
+                            f"{terminal.budget}-token prompt; older history and "
+                            "the full request were truncated to fit"
+                        )
+                        fmt.llm_timing(terminal.elapsed, finish_reason)
+                    if report:
+                        report.record_llm_call(
+                            turns + turn_offset,
+                            terminal.elapsed,
+                            terminal.tokens_after,
+                            finish_reason,
+                            is_retry=True,
+                            retry_reason="terminal_floor",
+                            provider_retries=terminal.provider_retries,
+                            cached_tokens=terminal.cache_stats[0],
+                            cache_write_tokens=terminal.cache_stats[1],
+                        )
+                    _account_goal_usage(
+                        terminal.tokens_after,
+                        terminal.cache_stats,
+                        terminal.elapsed,
+                    )
+                    _compaction_success = True
+
+            if not _compaction_success and _tne_pending is None:
                 if continue_here:
                     from .continue_here import write_continue_file
 
@@ -9541,7 +9712,8 @@ def run_agent_loop(
                         goal_state=goal_state,
                     )
                 raise ContextOverflowError(
-                    "context window exceeded even after compaction"
+                    "context window exceeded even after compaction and "
+                    "minimal-prompt retry"
                 )
 
             if _tne_pending is not None:

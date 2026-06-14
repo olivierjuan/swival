@@ -1,6 +1,7 @@
 """Tests for context window management: estimate_tokens, group_into_turns,
 compact_messages, drop_middle_turns, clamp_output_tokens, and ContextOverflowError."""
 
+import copy
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -39,6 +40,9 @@ from swival.agent import (
     ContextOverflowError,
     call_llm,
     _fix_orphaned_tool_calls,
+    _run_terminal_floor_ladder,
+    TerminalAttemptResult,
+    _TERMINAL_FLOOR_BUDGETS,
 )
 from swival.report import AgentError
 
@@ -1626,7 +1630,9 @@ class TestDropToolsEmergencyRetry:
 
     def test_eventual_failure_writes_continue_file(self, tmp_path):
         """If even the most aggressive emergency-truncate retry fails, we
-        still raise ContextOverflowError (no infinite loop)."""
+        still raise ContextOverflowError (no infinite loop). The terminal floor
+        ladder makes its fixed set of minimal-prompt attempts before giving up,
+        and the final error names that last resort."""
         from swival.agent import run_agent_loop
 
         call_count = 0
@@ -1638,17 +1644,18 @@ class TestDropToolsEmergencyRetry:
 
         messages = [_sys("system prompt"), _user("hello")]
         with patch("swival.agent.call_llm", side_effect=fake_call_llm):
-            with pytest.raises(ContextOverflowError):
+            with pytest.raises(ContextOverflowError, match="minimal-prompt retry"):
                 run_agent_loop(
                     messages,
                     _DUMMY_TOOLS,
                     **self._loop_kwargs(tmp_path),
                 )
 
-        # Bounded: compact_to_budget collapses the whole ladder into one
-        # commit, so the initial call plus a couple of progress-checked retries
-        # is all it takes before the loop gives up. No round-trip storm.
-        assert call_count <= 4
+        # Bounded: compact_to_budget collapses the whole ladder into one commit,
+        # so the initial call plus a couple of progress-checked retries is all
+        # the reactive loop takes; the terminal floor then adds one attempt per
+        # fixed budget before the loop gives up. No round-trip storm.
+        assert call_count <= 4 + len(_TERMINAL_FLOOR_BUDGETS)
 
 
 # ---------------------------------------------------------------------------
@@ -2820,3 +2827,303 @@ class TestCompactToBudget:
         )
         assert ok.met_budget is True
         assert ok.tokens_after <= 400
+
+
+# ---------------------------------------------------------------------------
+# Terminal floor ladder — the absolute backstop for unknown context windows
+# ---------------------------------------------------------------------------
+
+
+def _ok_msg(content="ok"):
+    return (
+        SimpleNamespace(content=content, tool_calls=None, role="assistant"),
+        "stop",
+        [],
+        0,
+        (0, 0),
+    )
+
+
+class TestTerminalFloorLadder:
+    """Unit tests for _run_terminal_floor_ladder (pure helper)."""
+
+    @staticmethod
+    def _common(**overrides):
+        base = dict(
+            api_base="http://127.0.0.1:1234",
+            model_id="test-model",
+            temperature=0.5,
+            top_p=None,
+            seed=None,
+            verbose=False,
+            llm_kwargs={},
+        )
+        base.update(overrides)
+        return base
+
+    @staticmethod
+    def _big(n=40, chars=4000):
+        msgs = [_sys("you are a helpful assistant")]
+        for i in range(n):
+            msgs.append(_user(f"question {i} " + "x" * chars))
+            msgs.append(_assistant(f"answer {i} " + "y" * chars))
+        msgs.append(_user("final question " + "z" * chars))
+        return msgs
+
+    def test_accepts_first_budget(self):
+        msgs = self._big()
+        with patch("swival.agent.call_llm", side_effect=lambda *a, **k: _ok_msg()):
+            res = _run_terminal_floor_ladder(msgs, **self._common())
+        assert isinstance(res, TerminalAttemptResult)
+        assert res.budget == _TERMINAL_FLOOR_BUDGETS[0]
+        assert res.msg.content == "ok"
+        assert res.finish_reason == "stop"
+        assert res.tokens_after <= _TERMINAL_FLOOR_BUDGETS[0]
+
+    def test_descends_to_smallest_budget(self):
+        msgs = self._big()
+        seq = [
+            ContextOverflowError("too big"),
+            ContextOverflowError("still too big"),
+            _ok_msg("recovered"),
+        ]
+
+        def picky(*args, **kwargs):
+            item = seq.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with patch("swival.agent.call_llm", side_effect=picky):
+            res = _run_terminal_floor_ladder(msgs, **self._common())
+        assert res is not None
+        assert res.budget == _TERMINAL_FLOOR_BUDGETS[-1]
+        assert res.msg.content == "recovered"
+
+    def test_truncated_tool_call_response_tries_next_budget(self):
+        from swival.report import ReportCollector
+
+        msgs = self._big()
+        report = ReportCollector()
+        calls = 0
+
+        def truncated_then_clean(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                bad_call = SimpleNamespace(
+                    id="tc1",
+                    type="function",
+                    function=SimpleNamespace(
+                        name="read_file",
+                        arguments="not-json",
+                    ),
+                )
+                return (
+                    SimpleNamespace(
+                        content=None,
+                        tool_calls=[bad_call],
+                        role="assistant",
+                    ),
+                    "length",
+                    [],
+                    0,
+                    (0, 0),
+                )
+            return _ok_msg("recovered")
+
+        with patch("swival.agent.call_llm", side_effect=truncated_then_clean):
+            res = _run_terminal_floor_ladder(
+                msgs,
+                budgets=(4096, 1024),
+                tools=_DUMMY_TOOLS,
+                turn=7,
+                report=report,
+                **self._common(),
+            )
+
+        assert res is not None
+        assert res.budget == 1024
+        assert res.msg.content == "recovered"
+        assert calls == 2
+        assert report.recovered_responses == 1
+
+    def test_all_budgets_rejected_returns_none(self):
+        msgs = self._big()
+        before = copy.deepcopy(msgs)
+
+        def always_overflow(*args, **kwargs):
+            raise ContextOverflowError("nope")
+
+        with patch("swival.agent.call_llm", side_effect=always_overflow):
+            res = _run_terminal_floor_ladder(msgs, **self._common())
+        assert res is None
+        assert msgs == before  # pristine on the failure path
+
+    def test_does_not_mutate_input_on_success(self):
+        msgs = self._big()
+        before = copy.deepcopy(msgs)
+        with patch("swival.agent.call_llm", side_effect=lambda *a, **k: _ok_msg()):
+            _run_terminal_floor_ladder(msgs, **self._common())
+        assert msgs == before
+
+    def test_output_pinned_and_tools_dropped(self):
+        msgs = self._big()
+        captured = {}
+
+        def capture(*args, **kwargs):
+            captured["max_output"] = args[3]
+            captured["tools"] = args[7]
+            return _ok_msg()
+
+        with patch("swival.agent.call_llm", side_effect=capture):
+            _run_terminal_floor_ladder(msgs, **self._common())
+        assert captured["max_output"] == MIN_OUTPUT_TOKENS
+        assert captured["tools"] is None
+
+    def test_non_overflow_error_propagates(self):
+        msgs = self._big()
+
+        def boom(*args, **kwargs):
+            raise AgentError("auth failed")
+
+        with patch("swival.agent.call_llm", side_effect=boom):
+            with pytest.raises(AgentError, match="auth failed"):
+                _run_terminal_floor_ladder(msgs, **self._common())
+
+    def test_collapses_to_system_user_when_forced(self):
+        msgs = self._big()
+        captured = {}
+
+        def capture(*args, **kwargs):
+            captured["prompt"] = args[2]
+            return _ok_msg()
+
+        with patch("swival.agent.call_llm", side_effect=capture):
+            _run_terminal_floor_ladder(msgs, budgets=(128,), **self._common())
+        prompt = captured["prompt"]
+        assert len(prompt) <= 2
+        assert prompt[-1]["role"] == "user"
+
+    def test_no_orphaned_tool_calls_after_truncation(self):
+        msgs = [
+            _sys("system " + "s" * 2000),
+            _user("original task " + "u" * 2000),
+            _assistant_tc([("tc1", "read_file", '{"file_path": "x"}')]),
+            _tool("tc1", "file contents " + "c" * 8000),
+            _assistant("done reading"),
+            _user("now answer " + "q" * 2000),
+        ]
+        captured = {}
+
+        def capture(*args, **kwargs):
+            captured["prompt"] = args[2]
+            return _ok_msg()
+
+        with patch("swival.agent.call_llm", side_effect=capture):
+            _run_terminal_floor_ladder(msgs, budgets=(256,), **self._common())
+        # The collapsed prompt must be a valid request: no tool result left
+        # without its originating tool call.
+        assert _fix_orphaned_tool_calls(copy.deepcopy(captured["prompt"])) is False
+
+
+def _noop_compact(messages, tools, *, budget, **kwargs):
+    """A compact_to_budget that never shrinks — forces the reactive loop to
+    give up so the terminal floor is reached."""
+    est = estimate_tokens(messages, tools)
+    return SimpleNamespace(
+        messages=messages,
+        tools=tools,
+        strategy="noop",
+        description="noop",
+        tokens_before=est,
+        tokens_after=est,
+        history_mutated=False,
+        dropped_tools=False,
+        met_budget=False,
+    )
+
+
+class TestTerminalFloorLoop:
+    """Integration: terminal floor recovery inside run_agent_loop."""
+
+    @staticmethod
+    def _loop_kwargs(tmp_path, **overrides):
+        from swival.thinking import ThinkingState
+        from swival.todo import TodoState
+
+        defaults = dict(
+            api_base="http://127.0.0.1:1234",
+            model_id="test-model",
+            max_turns=2,
+            max_output_tokens=1024,
+            temperature=0.5,
+            top_p=None,
+            seed=None,
+            context_length=None,
+            base_dir=str(tmp_path),
+            thinking_state=ThinkingState(verbose=False),
+            resolved_commands={},
+            skills_catalog={},
+            skill_read_roots=[],
+            extra_write_roots=[],
+            files_mode="some",
+            verbose=False,
+            llm_kwargs={"provider": "lmstudio", "api_key": None},
+            file_tracker=None,
+            todo_state=TodoState(verbose=False),
+            continue_here=False,
+        )
+        defaults.update(overrides)
+        return defaults
+
+    def test_terminal_floor_recovers_and_records(self, tmp_path):
+        from swival.agent import run_agent_loop
+        from swival.report import ReportCollector
+
+        def fake_call_llm(*args, **kwargs):
+            prompt = args[2]
+            if estimate_tokens(prompt, None) > 4090:
+                raise ContextOverflowError("context length exceeded")
+            return _ok_msg("recovered")
+
+        report = ReportCollector()
+        messages = [_sys("system"), _user("question " + "z" * 30000)]
+        with (
+            patch("swival.agent.compact_to_budget", side_effect=_noop_compact),
+            patch("swival.agent.call_llm", side_effect=fake_call_llm),
+        ):
+            answer, exhausted = run_agent_loop(
+                messages,
+                _DUMMY_TOOLS,
+                **self._loop_kwargs(tmp_path, report=report),
+            )
+
+        assert answer == "recovered"
+        assert exhausted is False
+        # History was committed to the truncated transcript plus the answer.
+        assert len(messages) <= 3
+        assert messages[-1]["role"] == "assistant"
+        llm_events = [e for e in report.events if e["type"] == "llm_call"]
+        assert any(e.get("retry_reason") == "terminal_floor" for e in llm_events)
+
+    def test_terminal_floor_total_failure_raises_distinct(self, tmp_path):
+        from swival.agent import run_agent_loop
+
+        def always_overflow(*args, **kwargs):
+            raise ContextOverflowError("context length exceeded")
+
+        messages = [_sys("system"), _user("question " + "z" * 30000)]
+        before = copy.deepcopy(messages)
+        with (
+            patch("swival.agent.compact_to_budget", side_effect=_noop_compact),
+            patch("swival.agent.call_llm", side_effect=always_overflow),
+        ):
+            with pytest.raises(ContextOverflowError, match="minimal-prompt retry"):
+                run_agent_loop(
+                    messages,
+                    _DUMMY_TOOLS,
+                    **self._loop_kwargs(tmp_path),
+                )
+        # Pristine history on total failure (nothing committed).
+        assert messages == before
