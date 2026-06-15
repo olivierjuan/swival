@@ -501,12 +501,12 @@ def _looks_like_context_overflow(exc, *, unknown_context_window: bool = False) -
     text = str(exc)
     if _CONTEXT_OVERFLOW_RE.search(text):
         return True
-    if unknown_context_window:
-        if _UNKNOWN_WINDOW_OVERFLOW_RE.search(text):
-            return True
-        if getattr(exc, "status_code", None) == 413:
-            return True
-    return False
+    if not unknown_context_window:
+        return False
+    return (
+        bool(_UNKNOWN_WINDOW_OVERFLOW_RE.search(text))
+        or getattr(exc, "status_code", None) == 413
+    )
 
 
 _CONTEXT_LIMIT_GT_RE = re.compile(r"(\d+)\s*tokens?\s*>\s*(\d+)", re.IGNORECASE)
