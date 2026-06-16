@@ -2110,7 +2110,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.43.29" },
     { name = "fast-cipher", specifier = ">=0.2.2" },
     { name = "google-cloud-aiplatform", specifier = ">=1.157.0" },
-    { name = "html-to-markdown", specifier = ">=3.6.6,<4" },
+    { name = "html-to-markdown", specifier = ">=3.6.2,<4" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "litellm", specifier = ">=1.89.0" },
     { name = "mcp", specifier = ">=1.27.2,<2" },
