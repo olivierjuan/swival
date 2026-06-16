@@ -137,7 +137,7 @@
 <p>Add it to your <code>swival.toml</code>:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--isolated&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
 
 [mcp_servers.chrome.env]
 NODE_OPTIONS = &quot;--no-warnings&quot;
@@ -147,7 +147,7 @@ NODE_OPTIONS = &quot;--no-warnings&quot;
   &quot;mcpServers&quot;: {
     &quot;chrome&quot;: {
       &quot;command&quot;: &quot;npx&quot;,
-      &quot;args&quot;: [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;],
+      &quot;args&quot;: [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--isolated&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;],
       &quot;env&quot;: { &quot;NODE_OPTIONS&quot;: &quot;--no-warnings&quot; }
     }
   }
@@ -157,7 +157,7 @@ NODE_OPTIONS = &quot;--no-warnings&quot;
 <p>This launches Chrome with a visible window. For headless operation (no UI), add <code>--headless</code>:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--isolated&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
 
 [mcp_servers.chrome.env]
 NODE_OPTIONS = &quot;--no-warnings&quot;
@@ -184,7 +184,7 @@ NODE_OPTIONS = &quot;--no-warnings&quot;
 <p>If you only need basic navigation and don't want the full DevTools toolset (performance, emulation, etc.), use <code>--slim</code>:</p>
 <pre><code class="language-toml">[mcp_servers.chrome]
 command = &quot;npx&quot;
-args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--slim&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
+args = [&quot;-y&quot;, &quot;chrome-devtools-mcp@latest&quot;, &quot;--headless&quot;, &quot;--isolated&quot;, &quot;--slim&quot;, &quot;--no-usage-statistics&quot;, &quot;--no-performance-crux&quot;]
 
 [mcp_servers.chrome.env]
 NODE_OPTIONS = &quot;--no-warnings&quot;
@@ -195,6 +195,7 @@ NODE_OPTIONS = &quot;--no-warnings&quot;
 <ul>
 <li><code>--no-usage-statistics</code> stops the "Google collects usage statistics" notice. Setting the <code>CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS</code> environment variable (or running under <code>CI</code>) has the same effect.</li>
 <li><code>--no-performance-crux</code> stops the message about sending trace URLs to the Google CrUX API.</li>
+<li><code>--isolated</code> isolates sessions, for concurrent instances.</li>
 <li><code>NODE_OPTIONS=--no-warnings</code> silences the <code>ExperimentalWarning: localStorage is not available</code> line, which comes from Node itself rather than the server, so no server flag controls it.</li>
 </ul>
 <p>One notice has no off switch: the security banner that begins "chrome-devtools-mcp exposes content of the browser instance" is printed unconditionally. If you want a completely silent startup, point <code>command</code> at a small wrapper script that runs the server and discards its stderr (<code>npx ... 2&gt;/dev/null</code>).</p>

@@ -20,7 +20,7 @@ Add it to your `swival.toml`:
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--no-performance-crux"]
+args = ["-y", "chrome-devtools-mcp@latest", "--isolated", "--no-usage-statistics", "--no-performance-crux"]
 
 [mcp_servers.chrome.env]
 NODE_OPTIONS = "--no-warnings"
@@ -33,7 +33,7 @@ Or, if you prefer the JSON config, add this to `.swival/mcp.json`:
   "mcpServers": {
     "chrome": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--no-performance-crux"],
+      "args": ["-y", "chrome-devtools-mcp@latest", "--isolated", "--no-usage-statistics", "--no-performance-crux"],
       "env": { "NODE_OPTIONS": "--no-warnings" }
     }
   }
@@ -47,7 +47,7 @@ This launches Chrome with a visible window. For headless operation (no UI), add 
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--no-usage-statistics", "--no-performance-crux"]
+args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated", "--no-usage-statistics", "--no-performance-crux"]
 
 [mcp_servers.chrome.env]
 NODE_OPTIONS = "--no-warnings"
@@ -90,7 +90,7 @@ If you only need basic navigation and don't want the full DevTools toolset (perf
 ```toml
 [mcp_servers.chrome]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--slim", "--no-usage-statistics", "--no-performance-crux"]
+args = ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated", "--slim", "--no-usage-statistics", "--no-performance-crux"]
 
 [mcp_servers.chrome.env]
 NODE_OPTIONS = "--no-warnings"
@@ -104,6 +104,7 @@ By default the server prints a few notices to stderr when Swival launches it. Th
 
 - `--no-usage-statistics` stops the "Google collects usage statistics" notice. Setting the `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` environment variable (or running under `CI`) has the same effect.
 - `--no-performance-crux` stops the message about sending trace URLs to the Google CrUX API.
+- `--isolated` isolates sessions, for concurrent instances.
 - `NODE_OPTIONS=--no-warnings` silences the `ExperimentalWarning: localStorage is not available` line, which comes from Node itself rather than the server, so no server flag controls it.
 
 One notice has no off switch: the security banner that begins "chrome-devtools-mcp exposes content of the browser instance" is printed unconditionally. If you want a completely silent startup, point `command` at a small wrapper script that runs the server and discards its stderr (`npx ... 2>/dev/null`).
