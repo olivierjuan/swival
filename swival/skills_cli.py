@@ -5,12 +5,12 @@ parser (see agent.main). Skills live in three locations:
 
   - project active:  <project>/.swival/skills/
   - global active:   ~/.config/swival/skills/
-  - skills library:  ~/.config/swival/plugins/skills/   (staging, not discovered)
+  - skills library:  ~/.config/swival/library/skills/   (staging, not discovered)
 
 `add <URL>` fetches a git repository and installs the skills under its
 `skills/` directory (or a single skill at the repo root); `add <name>` installs
 a skill or collection that already lives in the library. The library is two
-levels deep — `plugins/skills/<collection>/<skill>/SKILL.md`.
+levels deep — `library/skills/<collection>/<skill>/SKILL.md`.
 """
 
 import argparse

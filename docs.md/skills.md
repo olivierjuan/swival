@@ -81,7 +81,7 @@ There are three places skills can live. Two are active (the agent discovers them
 
 - `.swival/skills/` — active, this project.
 - `~/.config/swival/skills/` — active, every project.
-- `~/.config/swival/plugins/skills/` — the **library**: a shelf of collections you've downloaded but not necessarily turned on. The agent does not load skills from here.
+- `~/.config/swival/library/skills/` — the **library**: a shelf of collections you've downloaded but not necessarily turned on. The agent does not load skills from here.
 
 ### Adding from a URL
 

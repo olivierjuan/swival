@@ -33,7 +33,7 @@ def env(tmp_path, monkeypatch):
         project=project,
         project_skills=project / ".swival" / "skills",
         global_skills=xdg / "swival" / "skills",
-        library=xdg / "swival" / "plugins" / "skills",
+        library=xdg / "swival" / "library" / "skills",
     )
 
 

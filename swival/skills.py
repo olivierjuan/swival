@@ -336,11 +336,11 @@ def global_skills_dir() -> Path:
 def skills_library_dir() -> Path:
     """Staging library for downloaded skill collections.
 
-    Lives at ~/.config/swival/plugins/skills/ and is NOT scanned by
+    Lives at ~/.config/swival/library/skills/ and is NOT scanned by
     discover_skills — it holds collections fetched from URLs until the user
     installs individual skills into an active location.
     """
-    return config.global_config_dir() / "plugins" / "skills"
+    return config.global_config_dir() / "library" / "skills"
 
 
 def discover_skills(
