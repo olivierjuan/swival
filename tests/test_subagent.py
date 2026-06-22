@@ -630,14 +630,13 @@ class TestFreshCopyLifecycle:
         mgr = self._make_manager()
 
         def mock_thread_fn(handle, *args, **kwargs):
-            while not handle.cancel_flag.is_set():
-                time.sleep(0.01)
+            handle.cancel_flag.wait(timeout=0.1)
             handle.done.set()
 
         monkeypatch.setattr("swival.subagent._subagent_thread_fn", mock_thread_fn)
 
         mgr.spawn(task="task 1")
-        mgr.shutdown(timeout=5)
+        mgr.shutdown(timeout=1)
 
         fresh = mgr.fresh_copy()
         assert fresh.poll() == "No subagents."
@@ -655,29 +654,29 @@ class TestFreshCopyLifecycle:
         barrier = threading.Event()
 
         def mock_thread_fn(handle, *args, **kwargs):
-            barrier.wait(timeout=10)
+            barrier.wait(timeout=1)
             handle.done.set()
 
         monkeypatch.setattr("swival.subagent._subagent_thread_fn", mock_thread_fn)
 
         # Simulate: spawn on original, then reset (shutdown + fresh_copy)
         mgr.spawn(task="old task")
-        mgr.shutdown(timeout=5)
         barrier.set()
+        mgr.shutdown(timeout=1)
 
         fresh = mgr.fresh_copy()
         barrier2 = threading.Event()
 
         def mock_thread_fn2(handle, *args, **kwargs):
-            barrier2.wait(timeout=10)
+            barrier2.wait(timeout=1)
             handle.done.set()
 
         monkeypatch.setattr("swival.subagent._subagent_thread_fn", mock_thread_fn2)
 
         fresh.spawn(task="new task")
         # The outer finally should shut down `fresh`, not original `mgr`
-        fresh.shutdown(timeout=5)
         barrier2.set()
+        fresh.shutdown(timeout=1)
         for h in fresh._handles.values():
             assert h.done.is_set()
 

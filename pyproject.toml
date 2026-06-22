@@ -75,6 +75,11 @@ package = true
 constraint-dependencies = ["requests>=2.34.2", "cryptography>=49.0.0"]
 override-dependencies = ["aiohttp>=3.14.1", "python-dotenv>=1.2.2"]
 
+[tool.pytest.ini_options]
+markers = [
+    "stress: long-running or wall-clock-sensitive tests excluded from make test; run locally with `pytest -m stress` for real timeouts",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

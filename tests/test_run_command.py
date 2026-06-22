@@ -159,6 +159,7 @@ def test_auto_repair_annotation_appended_on_error(tmp_base):
     )
 
 
+@pytest.mark.stress
 def test_auto_repair_annotation_appended_on_timeout(tmp_base):
     sleep_path = _which("sleep")
     resolved = {"sleep": sleep_path}
@@ -211,6 +212,7 @@ def test_base_dir_not_directory_reports_error(tmp_path):
 # ---------- Test 7: Timeout enforcement ----------
 
 
+@pytest.mark.stress
 def test_timeout_enforcement(tmp_base):
     sleep_path = _which("sleep")
     resolved = {"sleep": sleep_path}
@@ -317,6 +319,7 @@ def test_tool_absent_when_no_commands():
 # ---------- Test 15: Timeout returns partial output ----------
 
 
+@pytest.mark.stress
 def test_timeout_partial_output(tmp_base):
     bash_path = _which("bash")
     resolved = {"bash": bash_path}
@@ -333,6 +336,7 @@ def test_timeout_partial_output(tmp_base):
 # ---------- Test 16: Process tree killed on timeout (Unix-only) ----------
 
 
+@pytest.mark.stress
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix-only: process group kill")
 def test_process_tree_killed(tmp_base):
     bash_path = _which("bash")
@@ -478,7 +482,7 @@ def test_startup_rejects_commands_inside_base_dir(tmp_path):
         env=env,
     )
     assert result.returncode != 0
-    assert "inside base directory" in result.stderr
+    assert "Commands inside the workspace" in " ".join(result.stderr.split())
 
 
 # ---------- Test 21: CLI parsing ----------

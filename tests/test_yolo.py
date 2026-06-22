@@ -614,6 +614,7 @@ class TestShellStringExecution:
         )
         assert "test" in result
 
+    @pytest.mark.stress
     @_unix_only
     def test_shell_string_timeout(self, tmp_path):
         result = _run_command(

@@ -230,7 +230,7 @@ def _patch_prompt_sequence(monkeypatch, responses):
             if val is KeyboardInterrupt:
                 raise KeyboardInterrupt
             return val
-        return ""
+        raise AssertionError("Prompt sequence exhausted")
 
     monkeypatch.setattr("swival.onboarding._session.prompt", fake_prompt)
 
@@ -383,7 +383,7 @@ class TestRunOnboarding:
             monkeypatch,
             [
                 "2",  # Quick setup
-                "4",  # OpenRouter
+                "5",  # OpenRouter
                 "openai/gpt-5.5",  # model
                 "1",  # I'll set OPENROUTER_API_KEY myself
                 "",  # skip context window
@@ -424,7 +424,7 @@ class TestRunOnboarding:
             monkeypatch,
             [
                 "2",  # Quick setup
-                "6",  # Generic OpenAI-compatible
+                "7",  # Generic OpenAI-compatible
                 "http://localhost:11434",  # base URL
                 "qwen3:32b",  # model
                 "2",  # Enter API key now
@@ -470,7 +470,7 @@ class TestRunOnboarding:
                 "y",  # Default server
                 "",  # No model
                 "2",  # Start over
-                "3",  # ChatGPT (second attempt)
+                "4",  # ChatGPT (second attempt)
                 "gpt-4.1",  # model
                 "",  # skip reasoning effort
                 "1",  # Yes, write config
@@ -492,7 +492,7 @@ class TestRunOnboarding:
             monkeypatch,
             [
                 "2",  # Quick setup
-                "3",  # ChatGPT
+                "4",  # ChatGPT
                 "gpt-4.1",
                 "",
                 "1",  # Yes, write config

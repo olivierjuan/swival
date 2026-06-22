@@ -136,6 +136,7 @@ class TestRunReviewer:
         assert code == 0
         assert str(tmp_path) in text
 
+    @pytest.mark.stress
     def test_timeout_returns_2(self, tmp_path):
         script = tmp_path / "reviewer.sh"
         script.write_text("#!/bin/sh\nsleep 999\n")

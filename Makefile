@@ -6,7 +6,7 @@ install:
 	uv sync
 
 test:
-	uv run python -m pytest tests/ -v
+	uv run python -m pytest tests/ -v -m 'not stress' --durations=25
 
 lint:
 	uv run ruff check swival/ tests/

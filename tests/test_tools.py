@@ -1148,17 +1148,27 @@ class TestAgentLoop:
         captured = capsys.readouterr()
         assert "The answer is 42." in captured.out
 
-    def test_max_turns_zero_exits_with_code_2(self, tmp_path):
-        """--max-turns 0 means the loop never runs; exit code should be 2."""
-        import subprocess
+    @pytest.mark.stress
+    def test_max_turns_zero_exits_with_code_2(self, monkeypatch, capsys):
+        """--max-turns 0 exits with code 2 without starting a slow subprocess."""
+        from swival import agent, config
 
-        result = subprocess.run(
+        monkeypatch.setattr(config, "load_config", lambda _: {})
+        monkeypatch.setattr(
+            agent,
+            "resolve_provider",
+            lambda **kwargs: (
+                "fake-model",
+                "http://127.0.0.1:1",
+                None,
+                None,
+                {"provider": "lmstudio"},
+            ),
+        )
+        monkeypatch.setattr(
+            "sys.argv",
             [
-                "uv",
-                "run",
-                "python",
-                "-m",
-                "swival.agent",
+                "agent",
                 "hello",
                 "--max-turns",
                 "0",
@@ -1168,17 +1178,14 @@ class TestAgentLoop:
                 "lmstudio",
                 "--base-url",
                 "http://127.0.0.1:1",
-            ],  # won't connect
-            capture_output=True,
-            text=True,
-            cwd=os.path.join(os.path.dirname(__file__), ".."),
+            ],
         )
-        # The loop condition `while turns < 0` is false immediately,
-        # so it hits the else branch and exits with code 2.
-        # However the LLM call happens inside the loop, so with max-turns=0
-        # it should just hit the else branch without trying to connect.
-        assert result.returncode == 2
-        assert "max turns" in result.stderr.lower()
+
+        with pytest.raises(SystemExit) as exc_info:
+            agent.main()
+
+        assert exc_info.value.code == 2
+        assert "max turns" in capsys.readouterr().err.lower()
 
 
 class TestExpandTilde:
