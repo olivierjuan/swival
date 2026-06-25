@@ -200,7 +200,7 @@ brew uninstall swival     # if installed with Homebrew
 <p>If you omit the positional task and pipe stdin, Swival reads the task from stdin. On an interactive terminal with no task, Swival enters REPL mode automatically.</p>
 <pre><code class="language-sh">swival -q &lt; objective.md
 
-cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.1
+cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.2
 </code></pre>
 <p>This is useful for longer prompts, reusable task files, and avoiding shell quoting.</p>
 <h2 id="running-with-huggingface">Running with HuggingFace</h2>
@@ -208,13 +208,13 @@ cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.1
 <pre><code class="language-sh">export HF_TOKEN=hf_your_token_here
 </code></pre>
 <p>Pick a model that supports tool calling and pass it in <code>org/model</code> format.</p>
-<pre><code class="language-sh">swival &quot;Hello world&quot; --provider huggingface --model zai-org/GLM-5.1
+<pre><code class="language-sh">swival &quot;Hello world&quot; --provider huggingface --model zai-org/GLM-5.2
 </code></pre>
 <p>This uses HuggingFace's serverless inference, which is the fastest way to try hosted models without provisioning anything. Serverless endpoints often have smaller context windows than local deployments, so long multi-turn sessions can hit context pressure sooner.</p>
 <p>If you need more headroom, you can provision a dedicated HuggingFace endpoint and pass its URL directly. Dedicated endpoints let you use the full deployed context window.</p>
 <pre><code class="language-sh">swival &quot;Hello world&quot; \
     --provider huggingface \
-    --model zai-org/GLM-5.1 \
+    --model zai-org/GLM-5.2 \
     --base-url https://xyz.endpoints.huggingface.cloud \
     --api-key hf_your_key
 </code></pre>
@@ -224,12 +224,12 @@ cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.1
 <pre><code class="language-sh">export OPENROUTER_API_KEY=sk_or_your_token_here
 </code></pre>
 <p>Then pass the model you want to use. OpenRouter has both free and paid tiers.</p>
-<pre><code class="language-sh">swival &quot;Hello world&quot; --provider openrouter --model z-ai/glm-5.1
+<pre><code class="language-sh">swival &quot;Hello world&quot; --provider openrouter --model z-ai/glm-5.2
 </code></pre>
 <p>OpenRouter models vary widely in context limits. When <code>--max-context-tokens</code> is not set, Swival looks the window up in LiteLLM's model registry; set it explicitly if your model is not listed there or you want a lower cap.</p>
 <pre><code class="language-sh">swival &quot;Hello world&quot; \
     --provider openrouter \
-    --model z-ai/glm-5.1 \
+    --model z-ai/glm-5.2 \
     --max-context-tokens 131072
 </code></pre>
 <p>For a deeper look at OpenRouter-specific options, see <a href="providers.html">Providers</a>.</p>

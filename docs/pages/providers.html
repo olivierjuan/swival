@@ -149,12 +149,12 @@ swival --profile gpt5 &quot;hard task&quot;
 <h2 id="huggingface-inference-api">HuggingFace Inference API</h2>
 <p>For HuggingFace, <code>--model</code> is required and must be in <code>org/model</code> format. Authentication comes from <code>HF_TOKEN</code> by default or <code>--api-key</code> if you pass one explicitly.</p>
 <pre><code class="language-sh">export HF_TOKEN=hf_your_token_here
-swival --provider huggingface --model zai-org/GLM-5.1 &quot;task&quot;
+swival --provider huggingface --model zai-org/GLM-5.2 &quot;task&quot;
 </code></pre>
 <p>Serverless HuggingFace endpoints often expose smaller context windows than local deployments, so long multi-turn coding sessions can hit context pressure sooner. When <code>--max-context-tokens</code> is not set, Swival looks the window up in LiteLLM's model registry; set the flag explicitly if your model is not listed there.</p>
 <p>For dedicated endpoints, keep the same model identifier and pass your endpoint URL and key.</p>
 <pre><code class="language-sh">swival --provider huggingface \
-    --model zai-org/GLM-5.1 \
+    --model zai-org/GLM-5.2 \
     --base-url https://xyz.endpoints.huggingface.cloud \
     --api-key hf_your_key \
     &quot;task&quot;
@@ -175,20 +175,20 @@ swival --provider huggingface --model zai-org/GLM-5.1 &quot;task&quot;
 <h2 id="openrouter">OpenRouter</h2>
 <p>For OpenRouter, <code>--model</code> is required and authentication comes from <code>OPENROUTER_API_KEY</code> or <code>--api-key</code>.</p>
 <pre><code class="language-sh">export OPENROUTER_API_KEY=sk_or_your_token_here
-swival --provider openrouter --model z-ai/glm-5.1 &quot;task&quot;
+swival --provider openrouter --model z-ai/glm-5.2 &quot;task&quot;
 </code></pre>
 <p>If you use an OpenRouter-compatible custom endpoint, set <code>--base-url</code>.</p>
 <pre><code class="language-sh">swival --provider openrouter \
-    --model z-ai/glm-5.1 \
+    --model z-ai/glm-5.2 \
     --base-url https://custom.openrouter.endpoint \
     --api-key sk_or_key \
     &quot;task&quot;
 </code></pre>
 <p>OpenRouter models vary widely in context limits. When <code>--max-context-tokens</code> is not set, Swival looks the window up in LiteLLM's model registry. If the model is missing from the registry, or you want a different limit, set the value explicitly:</p>
-<pre><code class="language-sh">swival --provider openrouter --model z-ai/glm-5.1 \
+<pre><code class="language-sh">swival --provider openrouter --model z-ai/glm-5.2 \
     --max-context-tokens 131072 &quot;task&quot;
 </code></pre>
-<p>Pass bare model identifiers like <code>z-ai/glm-5.1</code>. If you accidentally include a provider prefix (e.g. <code>openrouter/z-ai/glm-5.1</code>), Swival detects and corrects the double prefix.</p>
+<p>Pass bare model identifiers like <code>z-ai/glm-5.2</code>. If you accidentally include a provider prefix (e.g. <code>openrouter/z-ai/glm-5.2</code>), Swival detects and corrects the double prefix.</p>
 <h2 id="llamacpp">llama.cpp</h2>
 <p><a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> runs GGUF models locally through <code>llama-server</code>, which exposes an OpenAI-compatible API. Start the server first, then point Swival at it.</p>
 <p>Start <code>llama-server</code> with a model from HuggingFace:</p>

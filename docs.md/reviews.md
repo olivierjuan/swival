@@ -46,10 +46,10 @@ When `--reviewer-mode` is active, Swival reads the base directory from the first
 The `--self-review` flag is a shorthand that automatically builds the reviewer command by mirroring the current invocation's provider, model, and other settings. Instead of writing the reviewer command by hand:
 
 ```sh
-swival --provider huggingface --model zai-org/GLM-5.1 --yolo \
+swival --provider huggingface --model zai-org/GLM-5.2 --yolo \
     --skills-dir ~/skills \
     --reviewer 'swival --reviewer-mode \
-        --provider huggingface --model zai-org/GLM-5.1 \
+        --provider huggingface --model zai-org/GLM-5.2 \
         --quiet --yolo --skills-dir ~/skills' \
     "task"
 ```
@@ -57,7 +57,7 @@ swival --provider huggingface --model zai-org/GLM-5.1 --yolo \
 Use `--self-review`:
 
 ```sh
-swival --provider huggingface --model zai-org/GLM-5.1 --yolo \
+swival --provider huggingface --model zai-org/GLM-5.2 --yolo \
     --skills-dir ~/skills \
     --self-review \
     "task"

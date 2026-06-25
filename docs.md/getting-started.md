@@ -87,7 +87,7 @@ If you omit the positional task and pipe stdin, Swival reads the task from stdin
 ```sh
 swival -q < objective.md
 
-cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.1
+cat prompts/review.md | swival --provider huggingface --model zai-org/GLM-5.2
 ```
 
 This is useful for longer prompts, reusable task files, and avoiding shell quoting.
@@ -103,7 +103,7 @@ export HF_TOKEN=hf_your_token_here
 Pick a model that supports tool calling and pass it in `org/model` format.
 
 ```sh
-swival "Hello world" --provider huggingface --model zai-org/GLM-5.1
+swival "Hello world" --provider huggingface --model zai-org/GLM-5.2
 ```
 
 This uses HuggingFace's serverless inference, which is the fastest way to try hosted models without provisioning anything. Serverless endpoints often have smaller context windows than local deployments, so long multi-turn sessions can hit context pressure sooner.
@@ -113,7 +113,7 @@ If you need more headroom, you can provision a dedicated HuggingFace endpoint an
 ```sh
 swival "Hello world" \
     --provider huggingface \
-    --model zai-org/GLM-5.1 \
+    --model zai-org/GLM-5.2 \
     --base-url https://xyz.endpoints.huggingface.cloud \
     --api-key hf_your_key
 ```
@@ -131,7 +131,7 @@ export OPENROUTER_API_KEY=sk_or_your_token_here
 Then pass the model you want to use. OpenRouter has both free and paid tiers.
 
 ```sh
-swival "Hello world" --provider openrouter --model z-ai/glm-5.1
+swival "Hello world" --provider openrouter --model z-ai/glm-5.2
 ```
 
 OpenRouter models vary widely in context limits. When `--max-context-tokens` is not set, Swival looks the window up in LiteLLM's model registry; set it explicitly if your model is not listed there or you want a lower cap.
@@ -139,7 +139,7 @@ OpenRouter models vary widely in context limits. When `--max-context-tokens` is 
 ```sh
 swival "Hello world" \
     --provider openrouter \
-    --model z-ai/glm-5.1 \
+    --model z-ai/glm-5.2 \
     --max-context-tokens 131072
 ```
 

@@ -76,7 +76,7 @@ For HuggingFace, `--model` is required and must be in `org/model` format. Authen
 
 ```sh
 export HF_TOKEN=hf_your_token_here
-swival --provider huggingface --model zai-org/GLM-5.1 "task"
+swival --provider huggingface --model zai-org/GLM-5.2 "task"
 ```
 
 Serverless HuggingFace endpoints often expose smaller context windows than local deployments, so long multi-turn coding sessions can hit context pressure sooner. When `--max-context-tokens` is not set, Swival looks the window up in LiteLLM's model registry; set the flag explicitly if your model is not listed there.
@@ -85,7 +85,7 @@ For dedicated endpoints, keep the same model identifier and pass your endpoint U
 
 ```sh
 swival --provider huggingface \
-    --model zai-org/GLM-5.1 \
+    --model zai-org/GLM-5.2 \
     --base-url https://xyz.endpoints.huggingface.cloud \
     --api-key hf_your_key \
     "task"
@@ -121,14 +121,14 @@ For OpenRouter, `--model` is required and authentication comes from `OPENROUTER_
 
 ```sh
 export OPENROUTER_API_KEY=sk_or_your_token_here
-swival --provider openrouter --model z-ai/glm-5.1 "task"
+swival --provider openrouter --model z-ai/glm-5.2 "task"
 ```
 
 If you use an OpenRouter-compatible custom endpoint, set `--base-url`.
 
 ```sh
 swival --provider openrouter \
-    --model z-ai/glm-5.1 \
+    --model z-ai/glm-5.2 \
     --base-url https://custom.openrouter.endpoint \
     --api-key sk_or_key \
     "task"
@@ -137,11 +137,11 @@ swival --provider openrouter \
 OpenRouter models vary widely in context limits. When `--max-context-tokens` is not set, Swival looks the window up in LiteLLM's model registry. If the model is missing from the registry, or you want a different limit, set the value explicitly:
 
 ```sh
-swival --provider openrouter --model z-ai/glm-5.1 \
+swival --provider openrouter --model z-ai/glm-5.2 \
     --max-context-tokens 131072 "task"
 ```
 
-Pass bare model identifiers like `z-ai/glm-5.1`. If you accidentally include a provider prefix (e.g. `openrouter/z-ai/glm-5.1`), Swival detects and corrects the double prefix.
+Pass bare model identifiers like `z-ai/glm-5.2`. If you accidentally include a provider prefix (e.g. `openrouter/z-ai/glm-5.2`), Swival detects and corrects the double prefix.
 
 ## llama.cpp
 
