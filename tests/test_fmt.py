@@ -979,3 +979,123 @@ class TestRenderStreamChannels:
             "a\nb\nc", "d\ne\nf", " <tool>", width=10, height=1
         ).plain
         assert isinstance(out, str)
+
+
+class _TTYBuf(StringIO):
+    """A StringIO that reports itself as an interactive terminal."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def _interactive_console(buf: StringIO) -> Console:
+    """A forced-color console backed by a buffer that claims to be a real TTY."""
+    return Console(
+        file=buf,
+        force_terminal=True,
+        color_system="truecolor",
+        no_color=False,
+        width=80,
+        _environ={"TERM": "xterm-256color"},
+    )
+
+
+class _SwapConsole:
+    """Temporarily install a console, no-op out sleeps, and restore on exit."""
+
+    def __init__(self, monkeypatch, console: Console):
+        self._monkeypatch = monkeypatch
+        self._console = console
+        self._old = None
+
+    def __enter__(self) -> Console:
+        self._old = fmt._console
+        fmt._console = self._console
+        self._monkeypatch.setattr(fmt.time, "sleep", lambda *a, **k: None)
+        return self._console
+
+    def __exit__(self, *exc) -> None:
+        fmt._console = self._old
+
+
+class TestAnimationGating:
+    def test_enabled_on_real_interactive_tty(self, monkeypatch):
+        monkeypatch.delenv("SWIVAL_ANIMATIONS", raising=False)
+        with _SwapConsole(monkeypatch, _interactive_console(_TTYBuf())):
+            assert fmt.animations_enabled() is True
+
+    def test_disabled_when_not_a_terminal(self, monkeypatch):
+        monkeypatch.delenv("SWIVAL_ANIMATIONS", raising=False)
+        with _SwapConsole(monkeypatch, Console(file=StringIO(), width=80)):
+            assert fmt.animations_enabled() is False
+
+    def test_disabled_for_forced_color_into_a_pipe(self, monkeypatch):
+        # --color forces terminal output for ANSI in a file, but the stream is
+        # not a real TTY, so animations must stay off.
+        monkeypatch.delenv("SWIVAL_ANIMATIONS", raising=False)
+        piped = _interactive_console(StringIO())  # plain StringIO: isatty False
+        with _SwapConsole(monkeypatch, piped):
+            assert piped.is_terminal is True
+            assert fmt.animations_enabled() is False
+
+    def test_disabled_when_no_color(self, monkeypatch):
+        monkeypatch.delenv("SWIVAL_ANIMATIONS", raising=False)
+        console = Console(file=_TTYBuf(), force_terminal=True, no_color=True, width=80)
+        with _SwapConsole(monkeypatch, console):
+            assert fmt.animations_enabled() is False
+
+    def test_env_var_read_live(self, monkeypatch):
+        with _SwapConsole(monkeypatch, _interactive_console(_TTYBuf())):
+            monkeypatch.setenv("SWIVAL_ANIMATIONS", "0")
+            assert fmt.animations_enabled() is False
+            # Flipping the var mid-process takes effect without a reimport.
+            monkeypatch.setenv("SWIVAL_ANIMATIONS", "1")
+            assert fmt.animations_enabled() is True
+            monkeypatch.setenv("SWIVAL_ANIMATIONS", "off")
+            assert fmt.animations_enabled() is False
+
+
+class TestDecorativeAnimations:
+    def test_repl_splash_noop_when_not_terminal(self, monkeypatch):
+        buf = StringIO()
+        with _SwapConsole(monkeypatch, Console(file=buf, width=80)):
+            fmt.repl_splash(model="m", provider="p", workspace="/w")
+        assert buf.getvalue() == ""
+
+    def test_repl_splash_static_when_animations_off(self, monkeypatch):
+        monkeypatch.setenv("SWIVAL_ANIMATIONS", "0")
+        buf = _TTYBuf()
+        with _SwapConsole(monkeypatch, _interactive_console(buf)):
+            fmt.repl_splash(model="qwen3", provider="lmstudio", workspace="/tmp/ws")
+        out = buf.getvalue()
+        assert "qwen3" in out and "lmstudio" in out
+
+    def test_repl_splash_rule_is_static_even_when_animations_on(self, monkeypatch):
+        from rich.text import Text
+
+        monkeypatch.delenv("SWIVAL_ANIMATIONS", raising=False)
+        phases = []
+        monkeypatch.setattr(fmt, "_animate_logo", lambda: None)
+
+        def rule_text(phase=0.0):
+            phases.append(phase)
+            return Text(f"rule phase={phase}")
+
+        monkeypatch.setattr(fmt, "_gradient_rule_text", rule_text)
+        buf = _TTYBuf()
+        with _SwapConsole(monkeypatch, _interactive_console(buf)):
+            fmt.repl_splash(model="qwen3")
+        assert phases == [0.0]
+        assert "rule phase=0.0" in buf.getvalue()
+
+    def test_turn_header_animates_first_turn_only(self, monkeypatch):
+        monkeypatch.delenv("SWIVAL_ANIMATIONS", raising=False)
+        calls = []
+        monkeypatch.setattr(
+            fmt, "_animate_turn_rule", lambda title: calls.append(title)
+        )
+        with _SwapConsole(monkeypatch, _interactive_console(_TTYBuf())):
+            fmt.turn_header(1, 30, 100, 128000)
+            fmt.turn_header(2, 30, 200, 128000)
+            fmt.turn_header(7, 30, 300, 128000)
+        assert len(calls) == 1  # only the opening turn animates

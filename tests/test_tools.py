@@ -1,7 +1,5 @@
 """Tests for tools.py and edit.py modules."""
 
-import os
-
 import pytest
 
 import swival.tools as tools_mod

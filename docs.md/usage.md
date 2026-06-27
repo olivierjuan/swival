@@ -51,6 +51,12 @@ It starts automatically when no task is given on a terminal. Pass `--repl` to fo
 
 The REPL is built on `prompt-toolkit`, so it supports input history, history search, and normal terminal line editing.
 
+The REPL greets you with an animated splash, and the rule that marks the start of each request flows into place before it settles. These only play on a genuine interactive terminal with color, never when output is piped or redirected. To turn them off entirely, for a slow terminal, a screen reader, a remote shell, or just a preference for reduced motion, set `SWIVAL_ANIMATIONS=0`:
+
+```sh
+SWIVAL_ANIMATIONS=0 swival
+```
+
 ## Input Commands
 
 Slash commands work in interactive mode (typed at the REPL prompt) and optionally in one-shot mode. In one-shot mode, command dispatch is disabled by default because the input may come from an untrusted source (a pipe, a file, or an upstream program). Pass `--oneshot-commands` to enable it:

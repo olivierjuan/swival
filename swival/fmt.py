@@ -3,6 +3,8 @@
 import contextlib
 import difflib
 import math
+import os
+import random
 import threading
 import time
 
@@ -91,6 +93,36 @@ _TURN_GRADIENT = [
 ]
 
 
+def _gradient_line(
+    stops: list[tuple[int, int, int]], phase: float = 0.0, title: str | None = None
+) -> Text:
+    """A horizontal gradient rule, optionally with a centered bold title.
+
+    *phase* shifts the gradient sideways (wrapping at 1.0), so animating it
+    across a few cycles makes the colors flow into place before they settle.
+    """
+    width = _console.width or 80
+    text = Text()
+
+    def _dash(i: int) -> None:
+        t = ((i / max(width - 1, 1)) + phase) % 1.0
+        r, g, b = _lerp_color(stops, t)
+        text.append("─", style=Style(color=f"rgb({r},{g},{b})"))
+
+    if title is None:
+        for i in range(width):
+            _dash(i)
+        return text
+    title_str = f" {title} "
+    side = max((width - len(title_str)) // 2, 0)
+    for i in range(side):
+        _dash(i)
+    text.append(title_str, style=Style(bold=True, color="white"))
+    for i in range(side + len(title_str), width):
+        _dash(i)
+    return text
+
+
 class _GradientRule:
     """A horizontal rule with a gradient color ramp and centered title."""
 
@@ -98,20 +130,9 @@ class _GradientRule:
         self.title = title
 
     def __rich_console__(self, console, options):
-        width = options.max_width
-        title = f" {self.title} "
-        side = max((width - len(title)) // 2, 0)
-        text = Text()
-        for i in range(side):
-            t = i / max(width - 1, 1)
-            r, g, b = _lerp_color(_TURN_GRADIENT, t)
-            text.append("─", style=Style(color=f"rgb({r},{g},{b})"))
-        text.append(title, style=Style(bold=True, color="white"))
-        for i in range(side + len(title), width):
-            t = i / max(width - 1, 1)
-            r, g, b = _lerp_color(_TURN_GRADIENT, t)
-            text.append("─", style=Style(color=f"rgb({r},{g},{b})"))
-        yield from text.__rich_console__(console, options)
+        yield from _gradient_line(_TURN_GRADIENT, title=self.title).__rich_console__(
+            console, options
+        )
 
 
 def _turn_title(n: int, max_n: int, token_est: int, context_length: int | None) -> str:
@@ -121,16 +142,41 @@ def _turn_title(n: int, max_n: int, token_est: int, context_length: int | None) 
     return f"Turn {n}/{max_n} (~{token_est:,} tokens)"
 
 
+def _turn_rule_text(title: str, phase: float = 0.0) -> Text:
+    """The turn rule whose gradient can be shifted sideways by *phase*.
+
+    At ``phase == 0`` it matches the static :class:`_GradientRule`; animating
+    the phase down to zero makes the colors flow into place before they settle.
+    """
+    return _gradient_line(_TURN_GRADIENT, phase, title)
+
+
+def _animate_turn_rule(title: str) -> None:
+    """Flow the gradient across the turn rule a couple of cycles, then freeze."""
+    frames, cycles = 12, 1.5
+    with Live(console=_console, transient=False, auto_refresh=False) as live:
+        for f in range(frames):
+            phase = (1.0 - f / (frames - 1)) * cycles
+            live.update(_turn_rule_text(title, phase), refresh=True)
+            time.sleep(0.016)
+        live.update(_turn_rule_text(title, 0.0), refresh=True)
+
+
 def turn_header(
     n: int, max_n: int, token_est: int, context_length: int | None = None
 ) -> None:
     reset_state()
     _console.print()
     title = _turn_title(n, max_n, token_est, context_length)
-    if _console.is_terminal:
-        _console.print(_GradientRule(title))
-    else:
+    if not _console.is_terminal:
         _console.print(Rule(title, style="cyan"))
+    elif n <= 1 and animations_enabled():
+        # Animate only the opening turn of each request; the agent's own
+        # follow-up turns settle to a static rule so a long internal loop
+        # doesn't pay the animation cost on every iteration.
+        _animate_turn_rule(title)
+    else:
+        _console.print(_GradientRule(title))
 
 
 def llm_timing(elapsed: float, finish_reason: str) -> None:
@@ -264,9 +310,7 @@ def command_spinner(label: str, timeout: float | None = None):
     stop = threading.Event()
     dismissed = threading.Event()
     progress.start()
-    task_id = progress.add_task(
-        escape(label), total=timeout if determinate else None
-    )
+    task_id = progress.add_task(escape(label), total=timeout if determinate else None)
 
     advancer: threading.Thread | None = None
     if determinate:
@@ -322,9 +366,15 @@ def _input_marquee_text(text: str, offset: int, width: int) -> Text:
     start = offset % len(base)
     repeats = math.ceil((start + content_width) / len(base)) + 1
     tiled = base * repeats
+    visible = tiled[start : start + content_width]
 
     line = Text(_INPUT_MARQUEE_PREFIX, style="bold cyan")
-    line.append(tiled[start : start + content_width], style="cyan")
+    band = (offset * 1.4) % (content_width + 24) - 12
+    for i, ch in enumerate(visible):
+        glow = max(0.0, 1.0 - abs(i - band) / 9.0)
+        glow *= glow
+        r, g, b = _blend_white(0, 200, 220, glow)
+        line.append(ch, style=Style(color=f"rgb({r},{g},{b})", bold=glow > 0.4))
     return line
 
 
@@ -1237,6 +1287,25 @@ _LOGO = r"""
  ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝
 """.strip("\n")
 
+_LOGO_LINES = _LOGO.split("\n")
+_LOGO_MAX_LEN = max(len(ln) for ln in _LOGO_LINES)
+_LOGO_ROW_COUNT = len(_LOGO_LINES)
+
+
+def _animations_env_enabled() -> bool:
+    """Whether ``SWIVAL_ANIMATIONS`` permits decorative animations.
+
+    Read live on every call rather than captured at import, so a process that
+    sets or clears the variable (tests, embedders) takes effect immediately.
+    """
+    return os.environ.get("SWIVAL_ANIMATIONS", "1").strip().lower() not in (
+        "0",
+        "off",
+        "no",
+        "false",
+    )
+
+
 _GRADIENT_STOPS = [
     (32, 252, 214),  # mint neon
     (0, 177, 255),  # sky laser
@@ -1245,6 +1314,8 @@ _GRADIENT_STOPS = [
     (255, 65, 184),  # plasma pink
     (255, 204, 92),  # sunlit amber
 ]
+
+_DECODE_GLYPHS = "01<>/\\|=+*#%&▚▞░▒▓█"
 
 
 def _lerp_color(stops: list[tuple[int, int, int]], t: float) -> tuple[int, int, int]:
@@ -1262,6 +1333,153 @@ def _lerp_color(stops: list[tuple[int, int, int]], t: float) -> tuple[int, int, 
     )
 
 
+def _blend_white(r: int, g: int, b: int, w: float) -> tuple[int, int, int]:
+    """Blend an RGB color toward white by weight *w* in [0, 1]."""
+    return (
+        int(r + (255 - r) * w),
+        int(g + (255 - g) * w),
+        int(b + (255 - b) * w),
+    )
+
+
+def _logo_cell_color(row_idx: int, col_idx: int) -> tuple[int, int, int]:
+    """Gradient color for one logo cell, biased mostly by column."""
+    col_t = col_idx / max(_LOGO_MAX_LEN - 1, 1)
+    row_t = row_idx / max(_LOGO_ROW_COUNT - 1, 1)
+    return _lerp_color(_GRADIENT_STOPS, (col_t * 0.82) + (row_t * 0.18))
+
+
+def _logo_text(
+    highlight_center: float | None = None, highlight_width: float = 7.0
+) -> Text:
+    """Build the gradient logo as a Text.
+
+    When *highlight_center* is given, columns near that x position are blended
+    toward white so a bright band can be swept across the glyphs for the
+    startup shimmer.
+    """
+    text = Text()
+    for row_idx, row in enumerate(_LOGO_LINES):
+        padded = row.ljust(_LOGO_MAX_LEN)
+        for col_idx, ch in enumerate(padded):
+            r, g, b = _logo_cell_color(row_idx, col_idx)
+            if highlight_center is not None:
+                w = max(0.0, 1.0 - abs(col_idx - highlight_center) / highlight_width)
+                if w > 0.0:
+                    r, g, b = _blend_white(r, g, b, w * w)
+            text.append(ch, style=Style(color=f"rgb({r},{g},{b})", bold=True))
+        text.append("\n")
+    return text
+
+
+def _logo_lock_times() -> list[list[float]]:
+    """Per-cell reveal thresholds for the decode animation.
+
+    Each glyph gets a threshold in [0, 1] biased by its column so the art
+    resolves as a left-to-right wipe with enough jitter to look like the
+    characters are locking into place out of noise.
+    """
+    locks: list[list[float]] = []
+    for _ in _LOGO_LINES:
+        row_locks = []
+        for col_idx in range(_LOGO_MAX_LEN):
+            base = col_idx / max(_LOGO_MAX_LEN - 1, 1)
+            row_locks.append(min(1.0, base * 0.55 + random.random() * 0.5))
+        locks.append(row_locks)
+    return locks
+
+
+def _logo_text_decoded(reveal: float, locks: list[list[float]], frame: int) -> Text:
+    """Render the logo mid-decode.
+
+    Cells whose lock threshold has been passed show their true gradient glyph;
+    the rest flicker through random glyphs in a cold dim hue, so the wordmark
+    appears to condense out of static.
+    """
+    text = Text()
+    for row_idx, row in enumerate(_LOGO_LINES):
+        padded = row.ljust(_LOGO_MAX_LEN)
+        for col_idx, ch in enumerate(padded):
+            if ch == " ":
+                text.append(" ")
+                continue
+            if reveal >= locks[row_idx][col_idx]:
+                r, g, b = _logo_cell_color(row_idx, col_idx)
+                text.append(ch, style=Style(color=f"rgb({r},{g},{b})", bold=True))
+            else:
+                noise = _DECODE_GLYPHS[
+                    (frame * 7 + row_idx * 13 + col_idx * 5) % len(_DECODE_GLYPHS)
+                ]
+                shade = 70 + (col_idx * 9 + row_idx * 17) % 60
+                text.append(
+                    noise, style=Style(color=f"rgb(30,{shade},{shade + 30})", dim=True)
+                )
+        text.append("\n")
+    return text
+
+
+def _gradient_rule_text(phase: float = 0.0) -> Text:
+    """A full-width horizontal rule colored from the splash gradient.
+
+    *phase* shifts the gradient sideways (wrapping), so animating it across a
+    few cycles makes the colors appear to flow before they settle.
+    """
+    return _gradient_line(_GRADIENT_STOPS, phase)
+
+
+def _stderr_is_interactive() -> bool:
+    """True only when the stderr stream is a genuine interactive terminal.
+
+    Distinct from :pyattr:`Console.is_terminal`, which is also true when
+    ``--color`` forces terminal output so ANSI survives a pipe into a file.
+    Animations need a real TTY: otherwise their ``Live`` control sequences and
+    frame delays would leak into redirected or scripted output.
+    """
+    try:
+        return bool(_console.file.isatty())
+    except Exception:
+        return False
+
+
+def animations_enabled() -> bool:
+    """Whether the decorative REPL animations should play.
+
+    Requires a genuine interactive terminal with color, and the
+    ``SWIVAL_ANIMATIONS`` env var unset or truthy (set it to ``0``/``off``/
+    ``no``/``false`` to disable). Forcing color for a pipe (``--color`` into a
+    file) does not enable animations: a real TTY is required.
+    """
+    return (
+        _animations_env_enabled()
+        and _console.is_terminal
+        and not _console.no_color
+        and _stderr_is_interactive()
+    )
+
+
+def _animate_logo() -> None:
+    """Materialize the logo out of static, then sweep a shimmer band and settle.
+
+    Two acts share one live region so there is no flicker between them: first a
+    Matrix-style decode where glyphs lock in from left to right, then a bright
+    highlight band sweeping across the finished gradient wordmark.
+    """
+    locks = _logo_lock_times()
+    decode_frames = 16
+    shimmer_frames = 16
+    span = _LOGO_MAX_LEN + 16
+    with Live(console=_console, transient=False, auto_refresh=False) as live:
+        for f in range(decode_frames):
+            reveal = f / (decode_frames - 1)
+            live.update(_logo_text_decoded(reveal, locks, f), refresh=True)
+            time.sleep(0.03)
+        for i in range(shimmer_frames):
+            center = -8 + span * (i / (shimmer_frames - 1))
+            live.update(_logo_text(center), refresh=True)
+            time.sleep(0.03)
+        live.update(_logo_text(), refresh=True)
+
+
 def repl_splash(
     model: str = "",
     provider: str = "",
@@ -1271,22 +1489,11 @@ def repl_splash(
     if not _console.is_terminal:
         return
 
-    logo_lines = _LOGO.split("\n")
-    max_len = max(len(ln) for ln in logo_lines)
-    text = Text()
-    row_count = len(logo_lines)
-    for row_idx, row in enumerate(logo_lines):
-        padded = row.ljust(max_len)
-        for col_idx, ch in enumerate(padded):
-            col_t = col_idx / max(max_len - 1, 1)
-            row_t = row_idx / max(row_count - 1, 1)
-            t = (col_t * 0.82) + (row_t * 0.18)
-            r, g, b = _lerp_color(_GRADIENT_STOPS, t)
-            text.append(ch, style=Style(color=f"rgb({r},{g},{b})", bold=True))
-        text.append("\n")
-
     _console.print()
-    _console.print(text, end="")
+    if animations_enabled():
+        _animate_logo()
+    else:
+        _console.print(_logo_text(), end="")
     try:
         from importlib import metadata
 
@@ -1301,24 +1508,21 @@ def repl_splash(
     if model or provider or workspace:
         info_line = Text()
         if model:
-            info_line.append(f"  model: {model}", style="dim")
+            info_line.append("  model: ", style="dim")
+            info_line.append(model, style="cyan")
         if provider:
             if model:
                 info_line.append(" · ", style="dim")
-            info_line.append(f"provider: {provider}", style="dim")
+            info_line.append("provider: ", style="dim")
+            info_line.append(provider, style="cyan")
         if workspace:
             if model or provider:
                 info_line.append(" · ", style="dim")
-            info_line.append(f"workspace: {workspace}", style="dim")
+            info_line.append("workspace: ", style="dim")
+            info_line.append(workspace, style="cyan")
         _console.print(info_line)
 
-    grad_rule = Text()
-    width = _console.width or 80
-    for i in range(width):
-        t = i / max(width - 1, 1)
-        r, g, b = _lerp_color(_GRADIENT_STOPS, t)
-        grad_rule.append("─", style=Style(color=f"rgb({r},{g},{b})"))
-    _console.print(grad_rule)
+    _console.print(_gradient_rule_text())
 
 
 # -- External servers (MCP / A2A) --------------------------------------------
