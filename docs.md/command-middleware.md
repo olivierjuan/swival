@@ -103,7 +103,7 @@ After a successful rewrite, the rewritten command is re-evaluated against Swival
 
 ## RTK Integration
 
-[RTK](https://github.com/RTaskforce/rtk) is a CLI proxy that rewrites common commands to token-optimized equivalents. For example, `git status` becomes `rtk git status`, which produces a compact, structured summary instead of raw Git output.
+[RTK](https://github.com/rtk-ai/rtk) is a CLI proxy that rewrites common commands to token-optimized equivalents. For example, `git status` becomes `rtk git status`, which produces a compact, structured summary instead of raw Git output.
 
 RTK's `rewrite` subcommand takes a raw command string and prints the RTK equivalent if one exists, or produces no output if the command has no RTK counterpart.
 

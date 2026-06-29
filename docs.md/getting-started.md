@@ -49,6 +49,7 @@ brew uninstall swival     # if installed with Homebrew
 | ------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
 | `lmstudio`    | none                                                 | none                                                               |
 | `llamacpp`    | none                                                 | `--provider llamacpp`                                              |
+| `applefm`     | none                                                 | `--provider applefm` (experimental)                                |
 | `huggingface` | `HF_TOKEN` or `--api-key`                            | `--provider huggingface --model ORG/MODEL`                         |
 | `openrouter`  | `OPENROUTER_API_KEY` or `--api-key`                  | `--provider openrouter --model MODEL`                              |
 | `google`      | `--api-key`, `GEMINI_API_KEY`, or `OPENAI_API_KEY`   | `--provider google --model MODEL`                                  |

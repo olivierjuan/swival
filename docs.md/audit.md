@@ -45,7 +45,7 @@ swival> /audit
 Audit complete. 2 finding(s) written to audit-findings/. Open audit-findings/README.md to review.
 ```
 
-That `README.md` is the entry point for a reviewer: it carries the run metadata (commit, branch, scope), a one-row-per-finding table grouped by finding type (severity-ordered within each group), the run totals, and, when an audit only partially completed, a section listing each failed or pending artifact with its error code and the exact retry command. The per-finding `.md` and `.patch` files are still authoritative for the narrative and the fix; the README is what you open first.
+That `README.md` is the entry point for a reviewer: it carries the run metadata (commit, branch, scope), a one-row-per-finding table grouped by finding type (the group holding the most severe finding comes first, and findings are listed by number within each group), the run totals, and, when an audit only partially completed, a section listing each failed or pending artifact with its error code and the exact retry command. The per-finding `.md` and `.patch` files are still authoritative for the narrative and the fix; the README is what you open first.
 
 If no bugs are found:
 
@@ -227,7 +227,7 @@ The mode is expensive (it pays the full `--all` cost plus an extra Phase 2), so 
 swival> /audit --measure-triage swival/
 ```
 
-`--workers N` sets the number of parallel workers for triage and verification (default: 4). Verification is always capped at 2 regardless of this value.
+`--workers N` sets the number of parallel workers used across the audit's parallel phases: triage, deep review, verification, and adjudication (default: 4). Verification is always capped at 2 regardless of this value.
 
 ```text
 swival> /audit --workers 8

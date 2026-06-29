@@ -259,7 +259,7 @@ Useful for long-running sessions.
 
 `--yolo` is shorthand for `--files all --commands all`. It does not imply `--oneshot-commands`. Explicit `--files` or `--commands` flags take precedence over `--yolo`. Filesystem root access is always blocked.
 
-`--sandbox` selects the sandbox backend. The default is `builtin`, which uses application-layer path guards. Set it to `agentfs` to re-exec Swival inside an [AgentFS](agentfs.md) overlay for OS-enforced write isolation. Requires the `agentfs` binary on PATH.
+`--sandbox` selects the sandbox backend. The default is `builtin`, which uses application-layer path guards. Set it to `agentfs` to re-exec Swival inside an [AgentFS](agentfs.md) overlay for OS-enforced write isolation (requires the `agentfs` binary on PATH), or `nono` for capability-based OS sandboxing with Landlock or Seatbelt, network filtering, and optional rollback. The `nono` backend has its own family of flags (`--nono-profile`, `--nono-block-net`, `--nono-allow-domain`, `--nono-rollback`, and more); see [nono](nono.md) for the full list.
 
 `--sandbox-session` sets an AgentFS session ID so sandbox state persists across runs. Only valid with `--sandbox agentfs`.
 

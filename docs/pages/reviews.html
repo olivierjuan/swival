@@ -113,7 +113,7 @@
 <p>Reviewer execution has a 60-minute timeout. Timeout or spawn failures are treated as reviewer errors and do not discard the agent's answer.</p>
 <h2 id="reviewer-environment-variables">Reviewer Environment Variables</h2>
 <p>Swival sets context variables on the reviewer subprocess for each round. <code>SWIVAL_TASK</code> contains the original user task and is always set. <code>SWIVAL_REVIEW_ROUND</code> contains the current review round number and is always set.</p>
-<p><code>SWIVAL_MODEL</code> contains the resolved model identifier when available. When <code>--encrypt-secrets</code> is active, <code>SWIVAL_ENCRYPT_KEY</code> is set to the hex-encoded encryption key so the reviewer can decrypt secrets in the answer.</p>
+<p><code>SWIVAL_MODEL</code> contains the resolved model identifier when available. When <code>--encrypt-secrets</code> is active and an explicit key is configured (via <code>--encrypt-secrets-key</code>, config, or the <code>SWIVAL_ENCRYPT_KEY</code> environment variable), that key is forwarded to the reviewer as <code>SWIVAL_ENCRYPT_KEY</code> so it can decrypt secrets in the answer. The default per-session random key is not shared, so a reviewer running without a configured key sees secrets in their encrypted form.</p>
 <p>The reviewer inherits the parent environment too, but Swival's injected values override any same-named parent values.</p>
 <h2 id="using-swival-as-the-reviewer">Using Swival As The Reviewer</h2>
 <p>The <code>--reviewer-mode</code> flag turns Swival into a reviewer process that speaks the reviewer protocol natively. No wrapper script needed:</p>

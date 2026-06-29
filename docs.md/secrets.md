@@ -60,6 +60,17 @@ Or in the library API:
 session = Session(encrypt_secrets=True, encrypt_secrets_key="aabbccdd...")
 ```
 
+You can also set an optional tweak, a non-secret string that diversifies the ciphertext for a given key. With the same key but different tweaks, the same token encrypts to different fakes, which is handy for keeping projects separated. The tweak is config- and library-only (there is no CLI flag):
+
+```toml
+encrypt_secrets = true
+encrypt_secrets_tweak = "project-acme"
+```
+
+```python
+session = Session(encrypt_secrets=True, encrypt_secrets_tweak="project-acme")
+```
+
 ## Built-In Token Patterns
 
 Swival recognizes the following token types out of the box:

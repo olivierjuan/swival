@@ -125,7 +125,7 @@ state file and one set of reports:</p>
 <pre><code class="language-text">swival&gt; /audit
 Audit complete. 2 finding(s) written to audit-findings/. Open audit-findings/README.md to review.
 </code></pre>
-<p>That <code>README.md</code> is the entry point for a reviewer: it carries the run metadata (commit, branch, scope), a one-row-per-finding table grouped by finding type (severity-ordered within each group), the run totals, and, when an audit only partially completed, a section listing each failed or pending artifact with its error code and the exact retry command. The per-finding <code>.md</code> and <code>.patch</code> files are still authoritative for the narrative and the fix; the README is what you open first.</p>
+<p>That <code>README.md</code> is the entry point for a reviewer: it carries the run metadata (commit, branch, scope), a one-row-per-finding table grouped by finding type (the group holding the most severe finding comes first, and findings are listed by number within each group), the run totals, and, when an audit only partially completed, a section listing each failed or pending artifact with its error code and the exact retry command. The per-finding <code>.md</code> and <code>.patch</code> files are still authoritative for the narrative and the fix; the README is what you open first.</p>
 <p>If no bugs are found:</p>
 <pre><code class="language-text">No provable security bugs or security-control failures found in Git-tracked files.
 </code></pre>
@@ -238,7 +238,7 @@ swival&gt; /audit --regen --finding 2,4-6
 <p>The mode is expensive (it pays the full <code>--all</code> cost plus an extra Phase 2), so it is a calibration tool, not a default. A run started with <code>--measure-triage</code> cannot be resumed without it (and vice versa); start a fresh run instead.</p>
 <pre><code class="language-text">swival&gt; /audit --measure-triage swival/
 </code></pre>
-<p><code>--workers N</code> sets the number of parallel workers for triage and verification (default: 4). Verification is always capped at 2 regardless of this value.</p>
+<p><code>--workers N</code> sets the number of parallel workers used across the audit's parallel phases: triage, deep review, verification, and adjudication (default: 4). Verification is always capped at 2 regardless of this value.</p>
 <pre><code class="language-text">swival&gt; /audit --workers 8
 </code></pre>
 <p><code>--patch-max-turns N</code> sets the isolated Phase 5 patch-generation turn budget (default: 50). The CLI flag overrides <code>[audit].patch_max_turns</code> in <code>swival.toml</code>; project config overrides global config. Raising this value can rescue complex patches, but it also increases LLM spend for stubborn findings.</p>

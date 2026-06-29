@@ -30,7 +30,7 @@ The JSON below is from a verified local run using `--model dummy-model --max-tur
     "max_output_tokens": 32768,
     "context_length": null,
     "files": "some",
-    "commands": "none",
+    "commands": "all",
     "max_review_rounds": 15,
     "skills_discovered": [],
     "instructions_loaded": []
@@ -145,6 +145,8 @@ For `lifecycle`, fields include `event` (`startup` or `exit`), `exit_code`, `dur
 For `command_policy`, fields include `bucket` (the normalized command bucket) and `decision` (`allow`, `persist`, `once`, `always_ask`, `deny`, or `block`). The interactive decisions come from `--commands ask` approval prompts; a `block` decision is also recorded whenever any restricted policy (`none`, an allowlist, or a denied bucket) rejects a command.
 
 For `untrusted_input`, fields include `source` (the tool name, e.g. `fetch_url` or `mcp__server__tool`) and `origin` (the URL or empty string). These events are emitted when external content is successfully ingested.
+
+For `goal_event`, fields include `action` (one of `created`, `replaced`, `paused`, `resumed`, `budget_limited`, `completed`, or `cleared`) and, when a goal is active, a `goal` object carrying its current state. These events trace the persisted goal across the run. See [Goals](goal.md) for the goal lifecycle.
 
 For `repl_turn`, fields include `turn_offset` (the cumulative turn count at the start of this REPL turn) and `input` (the user's input text, truncated to 500 characters). These events appear only in REPL reports and mark the boundary between user interactions.
 

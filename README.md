@@ -17,7 +17,8 @@ It connects to [LM Studio](https://lmstudio.ai/),
 [Google Gemini](https://ai.google.dev/),
 [Gemini Enterprise Agent Platform](https://cloud.google.com/vertex-ai) (formerly Vertex AI),
 [ChatGPT Plus/Pro](https://chatgpt.com/),
-[AWS Bedrock](https://aws.amazon.com/bedrock/), any OpenAI-compatible server (ollama,
+[AWS Bedrock](https://aws.amazon.com/bedrock/), Apple Foundation Models
+(experimental), any OpenAI-compatible server (ollama,
 mlx_lm.server, vLLM, etc.), or any external command
 (`codex exec`, custom wrappers, etc.), sends your task, and runs an autonomous tool loop until
 it produces an answer. With LM Studio and llama.cpp it auto-discovers your
@@ -37,6 +38,7 @@ Pick the provider that matches how you want to run models:
 | GEAP (Vertex AI) | Google Cloud ADC or `GOOGLE_APPLICATION_CREDENTIALS` | `--provider geap --gcp-project ID --location REGION --model MODEL` | `swival --provider geap --gcp-project my-proj --location us-central1 --model gemini-3.1-pro "task"` |
 | ChatGPT Plus/Pro | browser auth on first run or `CHATGPT_API_KEY`       | `--provider chatgpt --model MODEL`                                 | `swival --provider chatgpt --model gpt-5.5 "task"`                                                  |
 | Generic          | optional `OPENAI_API_KEY`                            | `--provider generic --base-url URL --model MODEL`                  | `swival --provider generic --base-url http://127.0.0.1:8080 --model my-model "task"`                |
+| Apple FM (exp.)  | none (local server)                                  | `--provider applefm`                                               | `swival --provider applefm "task"`                                                                  |
 | AWS Bedrock      | AWS credential chain (`AWS_PROFILE`, env vars, IAM)  | `--provider bedrock --model MODEL`                                 | `swival --provider bedrock --model global.anthropic.claude-opus-4-6-v1 "task"`                      |
 | Command          | none                                                 | `--provider command --model "COMMAND"`                             | `swival --provider command --model "codex exec --full-auto" "task"`                                 |
 
@@ -216,7 +218,8 @@ setups, the `geap` provider authenticates via Application Default Credentials
 and routes through Vertex AI. With ChatGPT Plus/Pro,
 authenticate through your browser and use OpenAI's models through your existing
 subscription. With AWS Bedrock, pick up the AWS credential chain and call any
-Bedrock-hosted model. With the generic provider, connect to ollama, mlx_lm.server,
+Bedrock-hosted model. The experimental `applefm` provider talks to a local Apple
+Foundation Models server. With the generic provider, connect to ollama, mlx_lm.server,
 vLLM, or any other compatible server. With the command provider, shell out to any
 program that reads a prompt on stdin and writes a response on stdout. You pick
 the model and the infrastructure.

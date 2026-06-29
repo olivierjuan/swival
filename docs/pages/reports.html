@@ -122,7 +122,7 @@
     &quot;max_output_tokens&quot;: 32768,
     &quot;context_length&quot;: null,
     &quot;files&quot;: &quot;some&quot;,
-    &quot;commands&quot;: &quot;none&quot;,
+    &quot;commands&quot;: &quot;all&quot;,
     &quot;max_review_rounds&quot;: 15,
     &quot;skills_discovered&quot;: [],
     &quot;instructions_loaded&quot;: []
@@ -197,6 +197,7 @@
 <p>For <code>lifecycle</code>, fields include <code>event</code> (<code>startup</code> or <code>exit</code>), <code>exit_code</code>, <code>duration_s</code>, and optionally <code>error</code>. Lifecycle events appear when <code>--lifecycle-command</code> is configured. See <a href="lifecycle-hooks.html">Lifecycle Hooks</a> for details.</p>
 <p>For <code>command_policy</code>, fields include <code>bucket</code> (the normalized command bucket) and <code>decision</code> (<code>allow</code>, <code>persist</code>, <code>once</code>, <code>always_ask</code>, <code>deny</code>, or <code>block</code>). The interactive decisions come from <code>--commands ask</code> approval prompts; a <code>block</code> decision is also recorded whenever any restricted policy (<code>none</code>, an allowlist, or a denied bucket) rejects a command.</p>
 <p>For <code>untrusted_input</code>, fields include <code>source</code> (the tool name, e.g. <code>fetch_url</code> or <code>mcp__server__tool</code>) and <code>origin</code> (the URL or empty string). These events are emitted when external content is successfully ingested.</p>
+<p>For <code>goal_event</code>, fields include <code>action</code> (one of <code>created</code>, <code>replaced</code>, <code>paused</code>, <code>resumed</code>, <code>budget_limited</code>, <code>completed</code>, or <code>cleared</code>) and, when a goal is active, a <code>goal</code> object carrying its current state. These events trace the persisted goal across the run. See <a href="goal.html">Goals</a> for the goal lifecycle.</p>
 <p>For <code>repl_turn</code>, fields include <code>turn_offset</code> (the cumulative turn count at the start of this REPL turn) and <code>input</code> (the user's input text, truncated to 500 characters). These events appear only in REPL reports and mark the boundary between user interactions.</p>
 <p>For <code>session_clear</code>, the event marks that a <code>/clear</code> or <code>/new</code> command reset the conversation state. No additional fields. These events appear only in REPL reports.</p>
 <p>For Agent MetaSKILL events: <code>metaskill_start</code> includes <code>name</code> and <code>language</code>. <code>metaskill_step</code> includes <code>operation</code> (<code>ask</code> or <code>command</code>), <code>purpose</code> or <code>argv</code>, <code>duration_s</code>, and <code>success</code>.</p>

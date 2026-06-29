@@ -152,7 +152,7 @@ When skills are discovered, Swival exposes `use_skill` so the model can load ful
 When executable [Agent MetaSKILLs](metaskills.md) are discovered, Swival exposes `run_metaskill` so the model can execute dynamic skill workflows. Parameters:
 
 - `name` (required) — The metaskill name to execute. Constrained to an enum of discovered metaskill names.
-- `input` — A JSON object passed to the metaskill program as `input`.
+- `input` (required) — A JSON object passed to the metaskill program as `input`. Calling without it returns an `error: input is required` with the skill's instructions.
 - `max_ask_calls` — Override the nested model call budget (default 5).
 - `max_command_calls` — Override the command call budget (default 10, 0 disables commands).
 
@@ -180,7 +180,7 @@ Calling `save` before `restore` is not required. The system automatically create
 
 ### Dirty Scopes
 
-Tools are classified as read-only or mutating. Read-only tools (`read_file`, `read_multiple_files`, `list_files`, `grep`, `outline`, `fetch_url`, `view_image`, `think`, `todo`, `snapshot`) are safe to collapse because they don't change anything on disk. Mutating tools (`write_file`, `edit_file`, `delete_file`, `run_command`, unknown MCP tools, and A2A tools) dirty the scope.
+Tools are classified as read-only or mutating. Read-only tools (`read_file`, `read_multiple_files`, `list_files`, `grep`, `outline`, `fetch_url`, `view_image`, `think`, `todo`, `snapshot`) are safe to collapse because they don't change anything on disk. Mutating tools (`write_file`, `edit_file`, `delete_file`, `run_command`, `run_shell_command`, unknown MCP tools, and A2A tools) dirty the scope.
 
 If the scope contains mutating tool calls, `restore` fails with a list of the dirty tools. Pass `force=true` to override when you are confident the summary captures the mutations.
 
