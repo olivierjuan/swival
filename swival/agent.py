@@ -794,57 +794,61 @@ def _patch_chatgpt_identity_hooks():
 
 
 def _patch_chatgpt_responses_empty_output():
-    """Monkey-patch litellm ChatGPT Responses API to handle empty output.
+    """Backfill empty ChatGPT Responses API output from streamed items.
 
-    The ChatGPT backend streams output items via response.output_item.done
-    events but the final response.completed event may have output:[].
-    This thin wrapper calls the original method, then backfills from the
-    raw SSE body when the result has empty output.
+    ChatGPT streams each output item through an output_item.done event but
+    emits an empty `output` list on the final response.completed event. Since
+    litellm 1.90 a chat-completions call against a Responses-API model routes
+    through the responses streaming iterator, which keeps the completed event
+    verbatim. The empty output then reaches the chat-completion transform,
+    which raises "Unknown items in responses API response: []" and gets
+    retried forever as a transient network error.
+
+    Patch the iterator to remember the items it already streamed and fold them
+    back into the completed response when it arrives empty. The recovered items
+    are dumped to plain dicts so they take the chat transform's raw-dict path
+    (message text and function calls), matching LiteLLM's own SSE recovery.
     """
     try:
-        from litellm.llms.chatgpt.responses.transformation import (
-            ChatGPTResponsesAPIConfig,
+        from litellm.responses.streaming_iterator import (
+            BaseResponsesAPIStreamingIterator,
         )
+        from litellm.types.llms.openai import ResponsesAPIStreamEvents
     except ImportError:
         return
 
-    if getattr(ChatGPTResponsesAPIConfig, "_swival_patched", False):
+    if getattr(BaseResponsesAPIStreamingIterator, "_swival_patched", False):
         return
-    ChatGPTResponsesAPIConfig._swival_patched = True
+    BaseResponsesAPIStreamingIterator._swival_patched = True
 
-    _original = ChatGPTResponsesAPIConfig.transform_response_api_response
+    _original = BaseResponsesAPIStreamingIterator._process_chunk
 
-    def _patched_transform(self, model, raw_response, logging_obj):
-        result = _original(self, model, raw_response, logging_obj)
-        if getattr(result, "output", None):
+    def _patched_process_chunk(self, chunk):
+        result = _original(self, chunk)
+        if result is None:
             return result
-
-        body_text = getattr(raw_response, "text", None) or ""
-        done_items = []
-        for line in body_text.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("event:"):
-                continue
-            if stripped.startswith("data:"):
-                stripped = stripped[5:].lstrip()
-            if not stripped:
-                continue
-            try:
-                parsed = json.loads(stripped)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if (
-                isinstance(parsed, dict)
-                and parsed.get("type") == "response.output_item.done"
-            ):
-                item = parsed.get("item")
-                if isinstance(item, dict):
-                    done_items.append(item)
-        if done_items:
-            result.output = done_items
+        event_type = getattr(result, "type", None)
+        if event_type == ResponsesAPIStreamEvents.OUTPUT_ITEM_DONE:
+            item = getattr(result, "item", None)
+            if item is not None:
+                index = getattr(result, "output_index", None)
+                seen = getattr(self, "_swival_output_items", None)
+                if seen is None:
+                    seen = {}
+                    self._swival_output_items = seen
+                seen[index if index is not None else len(seen)] = item
+        elif event_type == ResponsesAPIStreamEvents.RESPONSE_COMPLETED:
+            seen = getattr(self, "_swival_output_items", None)
+            if seen:
+                response = getattr(self.completed_response, "response", None)
+                if response is not None and not getattr(response, "output", None):
+                    response.output = [
+                        item.model_dump() if hasattr(item, "model_dump") else item
+                        for _, item in sorted(seen.items())
+                    ]
         return result
 
-    ChatGPTResponsesAPIConfig.transform_response_api_response = _patched_transform
+    BaseResponsesAPIStreamingIterator._process_chunk = _patched_process_chunk
 
 
 def _raise_with_retries(exc):
