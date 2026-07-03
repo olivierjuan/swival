@@ -273,6 +273,8 @@ class TestCompactContext:
         tc.reasoning_content = "thinking " * 1000
         msgs = [_sys("s"), _user("q"), tc, _tool("tc1", "ok"), _assistant("done")]
 
+        # The native DeepSeek endpoint requires the field on tool-call turns,
+        # so compaction shrinks it to a placeholder instead of deleting it.
         compact_context(
             CompactionContext(
                 messages=msgs,
@@ -281,6 +283,7 @@ class TestCompactContext:
                 max_output_tokens=1000,
                 attempted_strategies=(COMPACTION_COMPACT_MESSAGES,),
                 model_id="deepseek-v4",
+                base_url="https://api.deepseek.com/v1",
             )
         )
 

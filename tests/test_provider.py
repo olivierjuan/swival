@@ -3202,7 +3202,9 @@ class TestLlamacppProfileIntegration:
 
 
 class TestKimiReasoningContent:
-    """Verify that call_llm injects reasoning_content for Kimi models."""
+    """call_llm injects a reasoning_content placeholder only when the endpoint
+    requires it (Moonshot's API, matched by base_url), never from the model
+    name alone."""
 
     def _mock_response(self):
         choice = MagicMock()
@@ -3249,7 +3251,10 @@ class TestKimiReasoningContent:
             ]
             assert assistant_msg["reasoning_content"] == " "
 
-    def test_kimi_model_detected_by_model_id(self):
+    def test_kimi_model_name_alone_does_not_inject(self):
+        """A model named "kimi" served off a non-native endpoint (here a local
+        server) is not talking to Moonshot's API, so no placeholder is added.
+        The requirement is a property of the endpoint, not the model name."""
         messages = [
             {"role": "user", "content": "hi"},
             {
@@ -3284,7 +3289,7 @@ class TestKimiReasoningContent:
             assistant_msg = [m for m in sent_messages if m.get("role") == "assistant"][
                 0
             ]
-            assert assistant_msg["reasoning_content"] == " "
+            assert "reasoning_content" not in assistant_msg
 
     def test_kimi_model_detected_by_moonshot_base_url(self):
         messages = [
@@ -3446,7 +3451,9 @@ class TestMimoReasoningContent:
         resp.choices = [choice]
         return resp
 
-    def test_mimo_detected_by_model_id(self):
+    def test_mimo_model_name_alone_does_not_inject(self):
+        """A model named "mimo" off a non-native endpoint is not the Xiaomi
+        platform, so no placeholder is added; detection is by endpoint."""
         messages = [
             {"role": "user", "content": "hi"},
             {
@@ -3479,7 +3486,7 @@ class TestMimoReasoningContent:
             )
             sent = mock_comp.call_args[1]["messages"]
             asst = [m for m in sent if m.get("role") == "assistant"][0]
-            assert asst["reasoning_content"] == " "
+            assert "reasoning_content" not in asst
 
     def test_mimo_detected_by_base_url(self):
         messages = [
@@ -3552,7 +3559,10 @@ class TestMimoReasoningContent:
             asst = [m for m in sent if m.get("role") == "assistant"][0]
             assert asst["reasoning_content"] == "I should call f to look up the answer."
 
-    def test_deepseek_detected_by_model_id(self):
+    def test_deepseek_model_name_alone_does_not_inject(self):
+        """A model named "deepseek" behind a proxy that is not the DeepSeek
+        platform gets no placeholder; the field is replayed only to the native
+        endpoint that requires it, matched by base_url."""
         messages = [
             {"role": "user", "content": "hi"},
             {
@@ -3585,7 +3595,7 @@ class TestMimoReasoningContent:
             )
             sent = mock_comp.call_args[1]["messages"]
             asst = [m for m in sent if m.get("role") == "assistant"][0]
-            assert asst["reasoning_content"] == " "
+            assert "reasoning_content" not in asst
 
     def test_deepseek_detected_by_base_url(self):
         messages = [
@@ -3687,8 +3697,13 @@ class TestPromoteReasoningContent:
 
 
 class TestReasoningContentOutbound:
-    """Ensure reasoning_content is preserved by default and stripped only for
-    strict provider routes.
+    """reasoning_content is stripped on outbound for every route except the
+    models that require the field back (see _needs_reasoning_content).
+
+    Stripping is the safe default: it round-trips only where a provider
+    mandates it and keeps mid-session model/provider switches working, since a
+    model never inherits another model's reasoning trace. The field still lives
+    in stored history for traces and export; only the outbound copy drops it.
     """
 
     def _mock_response(self):
@@ -3699,7 +3714,7 @@ class TestReasoningContentOutbound:
         resp.choices = [choice]
         return resp
 
-    def test_generic_preserves_existing_reasoning_content(self):
+    def test_generic_strips_existing_reasoning_content(self):
         messages = [
             {"role": "user", "content": "hi"},
             {
@@ -3733,12 +3748,14 @@ class TestReasoningContentOutbound:
             )
             sent = mock_comp.call_args[1]["messages"]
             asst = [m for m in sent if m.get("role") == "assistant"][0]
-            assert asst["reasoning_content"] == "leftover thought"
+            assert "reasoning_content" not in asst
+            # Stored history keeps it; only the outbound copy drops it.
+            assert messages[1]["reasoning_content"] == "leftover thought"
 
-    def test_generic_preserves_reasoning_on_non_tool_call_assistant(self):
-        """Replayed/imported transcripts may carry reasoning_content on an
-        assistant message that has no tool_calls. Preserve it by default so
-        reasoning-capable OpenAI-compatible providers can decide what to use."""
+    def test_generic_strips_reasoning_on_non_tool_call_assistant(self):
+        """A replayed/imported transcript may carry reasoning_content on an
+        assistant message with no tool_calls. It is another turn's internal
+        state, so a non-requiring route drops it rather than replaying it."""
         messages = [
             {"role": "user", "content": "hi"},
             {
@@ -3765,7 +3782,7 @@ class TestReasoningContentOutbound:
             )
             sent = mock_comp.call_args[1]["messages"]
             asst = [m for m in sent if m.get("role") == "assistant"][0]
-            assert asst["reasoning_content"] == "internal thought from a prior session"
+            assert "reasoning_content" not in asst
 
     def test_chatgpt_strips_existing_reasoning_content(self):
         messages = [
@@ -3833,6 +3850,82 @@ class TestReasoningContentOutbound:
             asst = [m for m in sent if m.get("role") == "assistant"][0]
             assert "reasoning_content" not in asst
             assert messages[1]["reasoning_content"] == "leftover thought"
+
+    def test_huggingface_strips_existing_reasoning_content(self):
+        """The HF router rejects reasoning_content on a replayed tool-call turn,
+        so it must be dropped on every huggingface request."""
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                    }
+                ],
+                "reasoning_content": "leftover thought",
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                None,
+                "google/gemma-4-31B-it",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="huggingface",
+                api_key="hf-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert "reasoning_content" not in asst
+            assert messages[1]["reasoning_content"] == "leftover thought"
+
+    def test_huggingface_never_injects_reasoning_placeholder(self):
+        """Even a reasoning model routed through HuggingFace must not gain the
+        placeholder that direct Kimi/DeepSeek/MiMo endpoints require."""
+        messages = [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "checking",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": "data"},
+        ]
+        with patch("litellm.completion") as mock_comp:
+            mock_comp.return_value = self._mock_response()
+            call_llm(
+                None,
+                "deepseek-ai/DeepSeek-V4",
+                messages,
+                100,
+                None,
+                None,
+                None,
+                None,
+                False,
+                provider="huggingface",
+                api_key="hf-test",
+            )
+            sent = mock_comp.call_args[1]["messages"]
+            asst = [m for m in sent if m.get("role") == "assistant"][0]
+            assert "reasoning_content" not in asst
 
 
 class TestOrphanedToolCallsStripsReasoning:

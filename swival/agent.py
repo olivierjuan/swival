@@ -1532,42 +1532,30 @@ _LITELLM_INTERNAL_KEYS = {
 }
 
 
-def _needs_reasoning_content(model_id: str, base_url: str | None) -> bool:
-    """Whether the target provider needs placeholder reasoning_content.
+def _needs_reasoning_content(base_url: str | None) -> bool:
+    """Whether the endpoint being called requires reasoning_content back.
 
-    Moonshot (Kimi) rejects tool-calling conversations when assistant
-    messages with tool_calls lack reasoning_content; Xiaomi MiMo returns
-    a 400 when historical reasoning is missing from any tool-calling
-    assistant turn in the conversation history. DeepSeek V4 thinking
-    models behave the same way; the older deepseek-reasoner tolerates the
-    field either way, so a broad "deepseek" match is safe.
+    This is a validation quirk of three hosted APIs, not a property of the
+    model weights.
+    Moonshot (Kimi) rejects a tool-calling conversation when an assistant
+    message with tool_calls lacks reasoning_content; the Xiaomi MiMo and
+    DeepSeek platforms return a 400 when any historical tool-calling turn is
+    missing the field.
+
+    The same model served through a different endpoint (HuggingFace,
+    OpenRouter, a local server) does not carry the requirement, and several of
+    those routers reject the field outright.
+    So the endpoint is matched by base_url, never by model name: only a direct
+    call to one of the native APIs replays the field.
     """
-    model_lower = model_id.lower()
-    if "kimi" in model_lower or "mimo" in model_lower or "deepseek" in model_lower:
-        return True
-    if base_url:
-        base_lower = base_url.lower()
-        if (
-            "moonshot" in base_lower
-            or "xiaomimimo" in base_lower
-            or "api.deepseek.com" in base_lower
-        ):
-            return True
-    return False
-
-
-def _strips_reasoning_content(
-    provider: str, model_id: str, base_url: str | None
-) -> bool:
-    """Whether this route should omit replayed reasoning_content."""
-    if _needs_reasoning_content(model_id, base_url):
+    if not base_url:
         return False
-    if provider == "chatgpt":
-        return True
-    if provider == "generic" and base_url:
-        base_lower = base_url.lower()
-        return "api.openai.com" in base_lower or "openai.azure.com" in base_lower
-    return False
+    base_lower = base_url.lower()
+    return (
+        "moonshot" in base_lower
+        or "xiaomimimo" in base_lower
+        or "api.deepseek.com" in base_lower
+    )
 
 
 def _promote_reasoning_content(msg) -> None:
@@ -2860,10 +2848,9 @@ def _strip_reasoning_content_for_compaction(
 def _compact_reasoning_payloads(
     messages: list,
     *,
-    model_id: str | None,
     base_url: str | None,
 ) -> bool:
-    preserve_tool_placeholders = _needs_reasoning_content(model_id or "", base_url)
+    preserve_tool_placeholders = _needs_reasoning_content(base_url)
     changed = _strip_reasoning_content_for_compaction(
         messages,
         preserve_tool_placeholders=preserve_tool_placeholders,
@@ -2949,7 +2936,6 @@ def compact_context(ctx: CompactionContext) -> CompactionResult:
         elif strategy == COMPACTION_STRIP_REASONING:
             _compact_reasoning_payloads(
                 ctx.messages,
-                model_id=ctx.model_id,
                 base_url=ctx.base_url,
             )
             description = "stripped replayed reasoning payloads"
@@ -5457,18 +5443,16 @@ def call_llm(
 
     messages = [_strip_internal(m) for m in messages]
 
-    _needs_reasoning = _needs_reasoning_content(model_id, base_url)
-    _strip_reasoning = _strips_reasoning_content(provider, model_id, base_url)
+    _needs_reasoning = _needs_reasoning_content(base_url)
     for i, m in enumerate(messages):
         if not (isinstance(m, dict) and m.get("role") == "assistant"):
             continue
-        if _strip_reasoning and "reasoning_content" in m:
-            patched = dict(m)
-            patched.pop("reasoning_content", None)
-            messages[i] = patched
-        elif (
-            _needs_reasoning and m.get("tool_calls") and not m.get("reasoning_content")
-        ):
+        if not _needs_reasoning:
+            if "reasoning_content" in m:
+                patched = dict(m)
+                patched.pop("reasoning_content", None)
+                messages[i] = patched
+        elif m.get("tool_calls") and not m.get("reasoning_content"):
             patched = dict(m)
             patched["reasoning_content"] = " "
             messages[i] = patched
