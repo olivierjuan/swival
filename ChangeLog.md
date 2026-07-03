@@ -2,6 +2,10 @@
 
 All notable user-facing changes to Swival.
 
+## 1.0.37
+
+- Whether Swival replays `reasoning_content` back to a provider is now decided by the endpoint it is talking to, not by the model's name. A DeepSeek or Kimi model served through Hugging Face, OpenRouter, or a local server was previously flagged as requiring the field, and several of those routers reject it outright.
+
 ## 1.0.36
 
 - Added a new `/model` REPL command for switching providers/models in-session. It can open an interactive picker, accept fuzzy direct model IDs, and fall back to direct entry when needed.
