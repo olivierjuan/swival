@@ -206,7 +206,7 @@ print(answer)
 </tr>
 <tr>
 <td><code>provider</code></td>
-<td>LLM provider: <code>"lmstudio"</code>, <code>"llamacpp"</code>, <code>"huggingface"</code>, <code>"openrouter"</code>, <code>"chatgpt"</code>, <code>"google"</code>, <code>"geap"</code> (<code>"vertexai"</code> is an alias), <code>"bedrock"</code>, <code>"generic"</code>, <code>"applefm"</code>, <code>"command"</code>, or a command string.</td>
+<td>LLM provider: <code>"lmstudio"</code>, <code>"llamacpp"</code>, <code>"huggingface"</code>, <code>"openrouter"</code>, <code>"chatgpt"</code>, <code>"google"</code>, <code>"geap"</code> (<code>"vertexai"</code> is an alias), <code>"bedrock"</code>, <code>"generic"</code>, <code>"applefm"</code>, or <code>"command"</code> (the command to run goes in <code>model</code>).</td>
 </tr>
 <tr>
 <td><code>model</code></td>
@@ -330,11 +330,11 @@ print(answer)
 </tr>
 <tr>
 <td><code>approved_buckets</code></td>
-<td>Pre-approved command buckets for <code>commands="ask"</code> mode (e.g. <code>{"ls", "git status"}</code>).</td>
+<td>Pre-approved command buckets for <code>commands="ask"</code> mode (e.g. <code>{"ls", "git push"}</code>).</td>
 </tr>
 <tr>
 <td><code>storm_breaker</code></td>
-<td>Detect repeated identical tool-call failures and inject a corrective hint. Default <code>True</code>.</td>
+<td>Suppress repeated identical tool calls, returning an error that tells the model to try a different approach. Default <code>True</code>.</td>
 </tr>
 <tr>
 <td><code>flatten_mcp_schemas</code></td>
@@ -491,7 +491,7 @@ class Result:
 <h3 id="agenterror"><code>AgentError</code></h3>
 <p>Base class for all swival errors that reach the caller. Raised on LLM failures, tool dispatch errors, provider connection problems, and any other runtime failure in the agent loop.</p>
 <h3 id="configerror"><code>ConfigError</code></h3>
-<p>Invalid configuration before the agent loop starts: missing model, bad API key format, malformed MCP server config, non-existent directories in <code>allowed_dirs</code>, conflicting options.</p>
+<p>Invalid configuration before the agent loop starts: missing model, missing API key, malformed MCP server config, non-existent directories in <code>allowed_dirs</code>, conflicting options.</p>
 <p><code>ConfigError</code> is a subclass of <code>AgentError</code>, so <code>except AgentError</code> catches it too.</p>
 <h3 id="contextoverflowerror"><code>ContextOverflowError</code></h3>
 <p>The context window is full and all compaction strategies (message shrinking, turn dropping, tool schema pruning, system prompt truncation) have been exhausted. This means the conversation grew too large for the model's context window and could not be recovered.</p>

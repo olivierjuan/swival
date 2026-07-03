@@ -350,15 +350,17 @@ and size of trace entries.
 
 A conforming host MUST enforce finite budgets. Recommended defaults:
 
-| Limit                             | Default     |
-| --------------------------------- | ----------- |
-| Nested `ask` calls                | 5           |
-| `command` calls                   | 10          |
-| Wall-clock execution timeout      | 300 seconds |
-| Trace entries                     | 100         |
-| Characters per nested answer      | 20,000      |
-| Characters per command result     | 20,000      |
-| Characters in final result string | 20,000      |
+| Limit                             | Default                   |
+| --------------------------------- | ------------------------- |
+| Nested `ask` calls                | 5                         |
+| Turns per nested `ask` call       | 30 (also the maximum)     |
+| `command` calls                   | 10                        |
+| `command` timeout                 | 30 seconds, capped at 120 |
+| Wall-clock execution timeout      | 300 seconds               |
+| Trace entries                     | 100                       |
+| Characters per nested answer      | 20,000                    |
+| Characters per command result     | 20,000                    |
+| Characters in final result string | 20,000                    |
 
 The `run_metaskill` operation MAY allow callers to set `max_ask_calls` and
 `max_command_calls` within host-defined bounds. Hosts SHOULD check cancellation

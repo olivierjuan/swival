@@ -131,6 +131,7 @@ swival --profile gpt5 &quot;hard task&quot;
 </code></pre>
 <pre><code>swival&gt; /profile gpt5
 </code></pre>
+<p>Profiles switch the whole stack at once. To change only the model within the current provider, use the <code>/model</code> command in the REPL: with no argument it opens an interactive picker over the models the provider can serve right now, <code>/model NAME</code> switches directly, and favorites you star in the picker are remembered across sessions. Bedrock, GEAP, and the command provider have no model listing, but <code>/model ID</code> still works. See <a href="usage.html">Usage</a> for the details.</p>
 <p>The sections below document each provider's flags, authentication, and behavior in detail.</p>
 <h2 id="lm-studio">LM Studio</h2>
 <p>LM Studio is the default provider and usually requires no flags when the local server is already running with a loaded model.</p>

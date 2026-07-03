@@ -156,12 +156,12 @@ swival skills delete --library pony                 # the whole collection
 Deletion happens immediately, with no confirmation prompt, but Swival always prints exactly what it removed:
 
 ```
-Removed skill ponytail/ponytail-help from the library
+Removed skill pony/ponytail-help from the library
 Removed collection 'pony' from the library
 ```
 
 ## A Note On Safety
 
-Cloning and staging never execute anything. Helper scripts and `SKILL.star` metaskills that ship inside a skill sit inert until you both install the skill and, for external metaskills, pass `--metaskills all`. Swival flags any installed skill that carries a `SKILL.star`, so a downloaded metaskill can't quietly become runnable. Clones run with credential prompts disabled, HTTP redirects refused, and non-git protocols blocked, and any URL that resolves to a private or internal address is rejected outright.
+Cloning and staging never execute anything. Helper scripts and `SKILL.star` metaskills that ship inside a skill sit inert until you both install the skill and, for external metaskills, pass `--metaskills all`. Swival flags any installed skill that carries a `SKILL.star`, so a downloaded metaskill can't quietly become runnable. Clones run with credential prompts disabled, HTTP redirects refused, and non-git protocols blocked, and any HTTP(S) URL that resolves to a private or internal address is rejected outright (an explicit localhost host is exempt).
 
 For everything about authoring skills, discovery precedence, and progressive disclosure, see the [Skills](skills.md) page. For the metaskill format and host API, see [Agent MetaSKILLs](metaskills.md).

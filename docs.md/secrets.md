@@ -75,36 +75,36 @@ session = Session(encrypt_secrets=True, encrypt_secrets_tweak="project-acme")
 
 Swival recognizes the following token types out of the box:
 
-| Pattern                   | Prefix          | Example                                          |
-| ------------------------- | --------------- | ------------------------------------------------ |
-| GitHub PAT                | `ghp_`          | `ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| GitHub OAuth              | `gho_`          | `gho_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| GitHub User-to-Server     | `ghu_`          | `ghu_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| GitHub Server-to-Server   | `ghs_`          | `ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| GitHub Refresh            | `ghr_`          | `ghr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| OpenAI (project)          | `sk-proj-`      | `sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| OpenAI (legacy)           | `sk-`           | `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`    |
-| Anthropic                 | `sk-ant-api03-` | `sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`  |
-| AWS Access Key            | `AKIA`          | `AKIAIOSFODNN7EXAMPLE`                           |
-| AWS Secret Key            | (heuristic)     | 40-char base64 strings near AWS context          |
-| Google API                | `AIza`          | `AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`        |
-| HuggingFace               | `hf_`           | `hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`        |
-| Stripe Secret (live)      | `sk_live_`      | `sk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| Stripe Publishable (live) | `pk_live_`      | `pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| Stripe Secret (test)      | `sk_test_`      | `sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| Stripe Publishable (test) | `pk_test_`      | `pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| Slack Bot                 | `xoxb-`         | `xoxb-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
-| Slack User                | `xoxp-`         | `xoxp-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
-| Vercel                    | `vercel_`       | `vercel_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`    |
-| GitLab PAT                | `glpat-`        | `glpat-xxxxxxxxxxxxxxxxxxxx`                     |
-| Datadog                   | `ddapi_`        | `ddapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`         |
-| PyPI                      | `pypi-`         | `pypi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`          |
-| npm                       | `npm_`          | `npm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
-| Supabase                  | `sbp_`          | `sbp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`           |
-| Grafana                   | `glc_`          | `glc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`           |
-| SendGrid                  | `SG.`           | `SG.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`            |
-| Twilio                    | `SK`            | `SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`             |
-| Fastly                    | (heuristic)     | 32-char alphanumeric strings near Fastly context |
+| Pattern                   | Prefix          | Example                                         |
+| ------------------------- | --------------- | ----------------------------------------------- |
+| GitHub PAT                | `ghp_`          | `ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| GitHub OAuth              | `gho_`          | `gho_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| GitHub User-to-Server     | `ghu_`          | `ghu_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| GitHub Server-to-Server   | `ghs_`          | `ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| GitHub Refresh            | `ghr_`          | `ghr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| OpenAI (project)          | `sk-proj-`      | `sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| OpenAI (legacy)           | `sk-`           | `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`   |
+| Anthropic                 | `sk-ant-api03-` | `sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
+| AWS Access Key            | `AKIA`          | `AKIAIOSFODNN7EXAMPLE`                          |
+| AWS Secret Key            | (heuristic)     | high-entropy 40-char base64 strings             |
+| Google API                | `AIza`          | `AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
+| HuggingFace               | `hf_`           | `hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       |
+| Stripe Secret (live)      | `sk_live_`      | `sk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| Stripe Publishable (live) | `pk_live_`      | `pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| Stripe Secret (test)      | `sk_test_`      | `sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| Stripe Publishable (test) | `pk_test_`      | `pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| Slack Bot                 | `xoxb-`         | `xoxb-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`     |
+| Slack User                | `xoxp-`         | `xoxp-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`     |
+| Vercel                    | `vercel_`       | `vercel_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`   |
+| GitLab PAT                | `glpat-`        | `glpat-xxxxxxxxxxxxxxxxxxxx`                    |
+| Datadog                   | `ddapi_`        | `ddapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`        |
+| PyPI                      | `pypi-`         | `pypi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`         |
+| npm                       | `npm_`          | `npm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`      |
+| Supabase                  | `sbp_`          | `sbp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`          |
+| Grafana                   | `glc_`          | `glc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`          |
+| SendGrid                  | `SG.`           | `SG.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`           |
+| Twilio                    | `SK`            | `SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`            |
+| Fastly                    | (heuristic)     | high-entropy 32-char base64url strings          |
 
 ## Custom Patterns
 

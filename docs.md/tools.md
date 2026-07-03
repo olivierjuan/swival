@@ -18,7 +18,7 @@ Each file read ends with a `[checksum=...]` trailer that hashes the file's curre
 
 ## `read_multiple_files`
 
-`read_multiple_files` reads several files in a single call. Each entry in the `files` array can specify its own `offset`, `limit`, and `tail_lines`, just like `read_file` (`offset` and `tail_lines` remain mutually exclusive per entry). Results are grouped by file with `--- path ---` headers and the same line-numbered format as `read_file`.
+`read_multiple_files` reads several files in a single call. Each entry in the `files` array can specify its own `offset`, `limit`, and `tail_lines`, just like `read_file` (`offset` and `tail_lines` remain mutually exclusive per entry). Results are grouped by file with `=== FILE: path ===` headers and the same line-numbered format as `read_file`.
 
 Per-file errors (missing files, binary files, path escapes) are reported inline without failing the batch. The total response is capped at 50 KB across all files. If the budget runs out mid-batch, the files already read are returned along with a truncation notice. A single oversized file is always included (with its own line-level truncation) so the tool never returns empty content for a valid request.
 
@@ -114,7 +114,7 @@ Raw response bodies are capped at 5 MB, and inline output is capped at 50 KB. La
 
 All `fetch_url` output is wrapped with an `[UNTRUSTED EXTERNAL CONTENT]` header before the model sees it. This label is also baked into spill files so it survives when the agent reads large results back via `read_file`. Failed fetches (errors) are not wrapped or counted.
 
-SSRF protections are built in. Swival resolves every URL in the redirect chain and blocks private, loopback, link-local, and reserved addresses.
+SSRF protections are built in. Swival resolves every URL in the redirect chain and blocks private, loopback, link-local, and reserved addresses. The exception is explicit loopback: URLs that name `localhost`, `127.0.0.1`, or `::1` directly are allowed, so local development servers stay reachable.
 
 ## `run_command`
 

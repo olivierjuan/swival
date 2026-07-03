@@ -46,7 +46,7 @@ Swival sends a JSON object to the script's stdin:
 }
 ```
 
-`messages` is the exact message list about to be sent. `tools` is included as read-only context so the filter can make informed decisions. `call_kind` is `"agent"` for normal turns and `"summary"` for compaction summaries.
+`messages` is the exact message list about to be sent. `tools` is included as read-only context so the filter can make informed decisions. `call_kind` is `"agent"` for normal turns and `"summary"` for internal summarization calls (compaction summaries, proactive checkpoints, continue-file enrichment).
 
 The script writes a JSON object to stdout. Two response shapes are supported:
 
@@ -139,7 +139,7 @@ else:
 
 **Cache:** Caching is disabled when a filter is active.
 
-**Reviewer:** The reviewer subprocess is a separate Swival invocation and can use its own `llm_filter` setting independently.
+**Reviewer:** The reviewer subprocess (`--reviewer-mode`) is a separate Swival invocation that does not apply the filter: its review call sends the task and answer to the provider unfiltered.
 
 ## Limitations
 

@@ -129,7 +129,7 @@ result = session.run(&quot;task&quot;)
   &quot;tools&quot;: [...]
 }
 </code></pre>
-<p><code>messages</code> is the exact message list about to be sent. <code>tools</code> is included as read-only context so the filter can make informed decisions. <code>call_kind</code> is <code>"agent"</code> for normal turns and <code>"summary"</code> for compaction summaries.</p>
+<p><code>messages</code> is the exact message list about to be sent. <code>tools</code> is included as read-only context so the filter can make informed decisions. <code>call_kind</code> is <code>"agent"</code> for normal turns and <code>"summary"</code> for internal summarization calls (compaction summaries, proactive checkpoints, continue-file enrichment).</p>
 <p>The script writes a JSON object to stdout. Two response shapes are supported:</p>
 <p><strong>Allow (with optional modifications):</strong></p>
 <pre><code class="language-json">{&quot;messages&quot;: [...]}
@@ -217,7 +217,7 @@ else:
 <p><strong>Command provider:</strong> Filtered messages flow through to the command provider the same way they flow to API-based providers. No separate filter path is needed.</p>
 <p><strong>Compaction summaries:</strong> Internal summarization calls also pass through the filter with <code>call_kind</code> set to <code>"summary"</code>, so sensitive content is redacted even during context management.</p>
 <p><strong>Cache:</strong> Caching is disabled when a filter is active.</p>
-<p><strong>Reviewer:</strong> The reviewer subprocess is a separate Swival invocation and can use its own <code>llm_filter</code> setting independently.</p>
+<p><strong>Reviewer:</strong> The reviewer subprocess (<code>--reviewer-mode</code>) is a separate Swival invocation that does not apply the filter: its review call sends the task and answer to the provider unfiltered.</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>Only one filter command is supported. If you need multiple filters, chain them inside a wrapper script.</li>

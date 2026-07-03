@@ -216,7 +216,7 @@ swival --extra-body '{"chat_template_kwargs": {"enable_thinking": false}}' "task
 swival --provider chatgpt --model gpt-5.5 --reasoning-effort high "task"
 ```
 
-`--show-thinking` keeps the model's streamed thinking in your terminal scrollback after the answer is printed, instead of wiping it when the live stream ends. It only affects the display — the thinking goes to stderr, never into stdout, history, traces, or reports — and it needs a verbose, interactive terminal with a provider that streams reasoning. Without it, a collapsed one-line note (`thinking: N lines, hidden`) is shown instead. The config-file equivalent is `show_thinking = true`.
+`--show-thinking` keeps the model's streamed thinking in your terminal scrollback after the answer is printed, instead of wiping it when the live stream ends. It only affects the display (the thinking goes to stderr, never into stdout, history, traces, or reports) and it needs a verbose, interactive terminal with a provider that streams reasoning. Without it, a collapsed one-line note (`thinking: N lines / ~M tokens, hidden`) is shown instead. The config-file equivalent is `show_thinking = true`.
 
 ### Service Tiers
 
@@ -345,6 +345,12 @@ See [A2A](a2a.md) for full configuration details.
 
 See [A2A](a2a.md) for full server documentation.
 
+### ACP Flags
+
+`--acp` speaks the Agent Client Protocol on stdio, for editor integration (Zed, agent-client-protocol.nvim, and others). Incompatible with `--serve`, `--repl`, and a positional task. See [ACP](acp.md).
+
+`--acp-log PATH` logs the JSON-RPC traffic and diagnostics to `PATH`. Only used with `--acp`.
+
 ### Output And Reporting Flags
 
 `--quiet` and `-q` suppress diagnostics and keep terminal output focused on final answers.
@@ -389,7 +395,7 @@ See [A2A](a2a.md) for full server documentation.
 
 `--logout` deletes locally cached ChatGPT OAuth credentials and exits. The next `--provider chatgpt` run starts the device-code login flow again.
 
-These setup flags do not require a question argument. Config generation refuses to overwrite an existing config file.
+These setup flags do not require a question argument. Config generation never overwrites an existing config file: if one exists, the template is written to a `.new` file next to it, with your current settings preserved, so you can review it before moving it into place.
 
 ### Outbound Filter Flag
 

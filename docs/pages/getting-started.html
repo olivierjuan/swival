@@ -113,7 +113,7 @@
 <pre><code class="language-sh">brew trust swival/tap
 brew install swival/tap/swival
 </code></pre>
-<p>This builds from source and pulls in Python 3.13 automatically. The first install takes a while because several dependencies compile native extensions.</p>
+<p>This builds from source and pulls in Python 3.14 automatically. The first install takes a while because several dependencies compile native extensions.</p>
 <h2 id="upgrading">Upgrading</h2>
 <p>To upgrade an existing installation to the newest release:</p>
 <pre><code class="language-sh">uv tool upgrade swival    # if installed with uv
@@ -123,6 +123,8 @@ brew upgrade swival       # if installed with Homebrew
 <pre><code class="language-sh">uv tool uninstall swival  # if installed with uv
 brew uninstall swival     # if installed with Homebrew
 </code></pre>
+<h2 id="first-run-setup">First-Run Setup</h2>
+<p>The first time you run <code>swival</code> on an interactive terminal with no config, a short setup wizard offers to walk you through picking a provider. It writes a global config file to <code>~/.config/swival/config.toml</code> with your choices stored as a default profile, so later runs need no flags. You can skip it, or choose "Don't show this again" to suppress it for good. The wizard stays out of the way whenever a config file already exists or you pass <code>--provider</code> or <code>--profile</code> explicitly, so none of the commands below will trigger it.</p>
 <h2 id="provider-quick-reference">Provider Quick Reference</h2>
 <table>
 <thead>

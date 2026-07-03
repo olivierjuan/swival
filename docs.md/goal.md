@@ -4,7 +4,7 @@ Set an objective with `/goal <objective>` in the REPL and Swival keeps the agent
 
 It is a structured spin on the Ralph-style "keep prompting until it's done" loop.
 
-The agent does not get to declare victory and walk away after one turn: the original objective is fed back to the model after every answer, and the loop only ends when the agent itself signals the goal is complete after a real evidence-based audit, declares a blocker, or hits the optional token budget.
+The agent does not get to declare victory and walk away after one turn: the original objective is fed back to the model after every answer, and the loop only ends when the agent itself signals the goal is complete after a real evidence-based audit, declares a blocker, hits the optional token budget, or exhausts the run's `--max-turns` ceiling.
 
 This makes it practical to point Swival at ambitious, long-running tasks like refactors, audits, or end-to-end fixes, and let it grind for hours without giving up halfway. Pause, resume, replace, or clear the goal at any time.
 
@@ -26,7 +26,7 @@ After each turn that produces a final text answer with an active goal, the runti
 
 If a continuation produces a final text answer with no tool calls, further continuations are suppressed to avoid a final-text loop, and the model's text is returned as a blocker or progress note.
 
-While the goal loop is running, hit `Ctrl+C` at any time to interject. Swival pauses at the next safe point and prompts for a new line of input, which is folded in as an extra user message before the loop resumes. This is the way to redirect the agent mid-flight, supply a missing piece of context, or correct course without clearing the goal.
+While the goal loop is running, hit `Ctrl+C` at any time to interrupt. Swival stops the run, pauses the goal, and returns you to the REPL prompt. Type any extra context or corrections as a regular message, then run `/continue` to resume the paused goal. This is the way to redirect the agent mid-flight, supply a missing piece of context, or correct course without clearing the goal.
 
 ## The `complete_goal` Tool
 
@@ -36,7 +36,7 @@ Goal state is started and controlled by the operator through `/goal`. The model 
 
 ## Token Budget Wrap-Up
 
-When the optional `token_budget` is reached, the goal transitions to `budget_limited`. The runtime injects a wrap-up steering prompt, and the dispatcher rejects mutating or work-starting tool calls (write, edit, command execution, subagents, MCP, A2A) with a fixed error string. Read-only tools (`read_file`, `read_multiple_files`, `grep`, `list_files`, `fetch_url`, `view_image`, `think`, `todo`, `snapshot`, `outline`) and `complete_goal` remain available for a coherent wrap-up.
+When the optional `token_budget` is reached, the goal transitions to `budget_limited`. The runtime injects a wrap-up steering prompt, and the dispatcher rejects mutating or work-starting tool calls (write, edit, command execution, subagents, MCP, A2A) with a fixed error string. Read-only tools (`read_file`, `read_multiple_files`, `grep`, `list_files`, `fetch_url`, `view_image`, `think`, `outline`) and `complete_goal` remain available for a coherent wrap-up; `todo` and `snapshot` stay available only for their read-only actions (`list` and `status`).
 
 ## Slash Command Reference
 

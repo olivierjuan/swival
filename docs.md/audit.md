@@ -63,7 +63,7 @@ The audit runs in a sequence of phases. State is checkpointed after each phase a
 
 ### Phase 1: Repository Profiling
 
-Reads manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `Makefile`, etc.) and entry-point candidates from committed code, then calls the LLM to produce a compact repository profile: detected languages, frameworks, entry points, trust boundaries, persistence layers, auth surfaces, and dangerous operations. This profile is reused as context in every subsequent phase.
+Reads manifests (`package.json`, `pyproject.toml`, `Cargo.toml`, `Makefile`, etc.) and entry-point candidates from committed code, then calls the LLM to produce a compact repository profile: detected languages, frameworks, entry points, trust boundaries, persistence layers, auth surfaces, and dangerous operations. This profile is reused as context in the triage, deep review, and adjudication phases.
 
 Files are ordered by an attack-surface heuristic that scores keywords like `exec`, `eval`, `auth`, `token`, `sql`, `template`, and `socket`. Higher-scoring files are processed first.
 
@@ -92,13 +92,13 @@ Triage runs in parallel with configurable worker count. The end-of-phase output 
 
 Each escalated file goes through a two-step deep review.
 
-**Inventory (3a):** The LLM produces a compact list of finding stubs (title, severity, exact `path:line` location, and a one-line claim under 20 words). At most 3 findings per file. Speculative findings are explicitly rejected.
+**Inventory (3a):** The LLM produces a compact list of finding stubs (title, severity, exact `path:line` location, attacker, trigger, impact, and a one-line claim under 20 words). At most 3 findings per file. Speculative findings are explicitly rejected.
 
-**Expansion (3b):** Each finding stub is expanded with proof details: finding type, preconditions, a propagation-path proof, and a minimal fix outline. A file's stubs are expanded one after another; files themselves are deep-reviewed in parallel across the worker pool.
+**Expansion (3b):** Each finding stub is expanded with proof details: finding type, attacker, trigger, impact, preconditions, a propagation-path proof, and a minimal fix outline. A file's stubs are expanded one after another; files themselves are deep-reviewed in parallel across the worker pool.
 
 Both steps see more than the file itself. Swival resolves the cross-file functions the file actually calls, preferring explicit imports and falling back to the dependency index built in Phase 1, and appends their exact committed bodies as a "Called function definitions" section, each labeled with its own path and line span. A validation helper that lives two files away is reviewed next to its call site, which is what lets a finding land on the helper that is actually broken rather than on the caller. The section is budgeted (8000 bytes per definition, 24000 bytes per prompt); callees that do not fit degrade to one-line pointers instead of vanishing. The same enrichment rides along on the evidence bundles used in verification, adjudication, and report generation.
 
-The two are merged into canonical `FindingRecord` objects. JSON parse failures trigger an automatic LLM repair pass; if repair also fails, the entire file gets one analytical retry. When a file rated ESCALATE_HIGH by triage comes back with an empty inventory, the inventory call is re-asked once with the identical prompt: an empty result on the files triage rated highest is the most likely place for a small model to over-suppress, and one bounded re-ask catches the sampling noise.
+The two are merged into canonical `FindingRecord` objects. Parse failures trigger an automatic LLM repair pass; if repair also fails, the entire file gets one analytical retry. When a file rated ESCALATE_HIGH by triage comes back with an empty inventory, the inventory call is re-asked once with the identical prompt: an empty result on the files triage rated highest is the most likely place for a small model to over-suppress, and one bounded re-ask catches the sampling noise.
 
 When a file plus its context exceeds the model's context window, the evidence is head-truncated to fit. The prompts are ordered so the least valuable content goes first: the cross-file callee section, then the tail of the file, never the path declaration or the finding under expansion. Truncation is no longer silent: each truncated call emits a warning during the run, shows up in the end-of-phase metrics, and any file deep-reviewed on partial evidence is listed in the README ("N file(s) deep-reviewed with truncated Phase 3 evidence"). Partial evidence means the context window was too small for the file; re-run with a larger context or split the file.
 
@@ -113,7 +113,7 @@ The verifier can inspect code and optionally compile or run small proof-of-conce
 
 The verdict has to appear on its own line; the parser scans the answer from the end for an exact `REPRODUCED` or `NOTREPRODUCED` line. An answer that never commits to a verdict (empty output, a turn budget exhausted before the token, prose that only mentions the keywords) is treated as an infrastructure failure, not as a negative verdict: the finding is marked failed and retried rather than silently discarded. This distinction matters most on small local models, which drop the token far more often than they genuinely refute a finding.
 
-Verified findings advance to artifact generation. Discarded findings are dropped. Failed verifications (infrastructure errors, timeouts, missing verdict tokens) are retried once for transient errors, then up to three batch attempts; whatever still fails is reported as incomplete and can be resumed with `--resume`.
+Verified findings advance to the adjudication gate. Discarded findings are dropped. Failed verifications (infrastructure errors, timeouts, missing verdict tokens) are retried once for transient errors, then up to three batch attempts; whatever still fails is reported as incomplete and can be resumed with `--resume`.
 
 Verification runs in parallel, capped at 2 concurrent workers regardless of the `--workers` setting.
 
@@ -266,7 +266,7 @@ swival> /audit src/api/ --regen
 force_review = ["swival/audit.py", "swival/edit.py", "swival/sandbox_*.py"]
 ```
 
-`force_review` is a list of path globs evaluated against repo-relative paths from `git ls-files`, using the same matcher as `/audit` focus arguments (see "Filtering" below for the full rules). A trailing `/` on a non-wildcard entry expands to the directory and everything below it (`src/` matches `src/a.py`, `src/sub/b.py`, and so on); a single `*` does not cross `/`, so `src/*.py` matches only direct children, while `src/**/*.py` recurses.
+`force_review` is a list of path globs evaluated against the repo-relative paths of committed files at `HEAD`, using the same matcher as `/audit` focus arguments (see "Filtering" below for the full rules). A trailing `/` on a non-wildcard entry expands to the directory and everything below it (`src/` matches `src/a.py`, `src/sub/b.py`, and so on); a single `*` does not cross `/`, so `src/*.py` matches only direct children, while `src/**/*.py` recurses.
 
 Matching files are unconditionally promoted into Phase 3, regardless of what triage decides. It is the surgical alternative to `--all` for paths you always want deep-reviewed.
 

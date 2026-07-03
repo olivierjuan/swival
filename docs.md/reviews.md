@@ -18,7 +18,7 @@ If the reviewer exits with code `1`, Swival treats reviewer standard output as f
 
 If the reviewer exits with code `2`, Swival treats that as reviewer failure, warns on standard error when diagnostics are enabled, and accepts the current answer unchanged. Any other nonzero exit code is handled the same way as `2`.
 
-Reviewer standard output and standard error are both captured. Standard error is forwarded to the outer process when verbose, and recorded in the report timeline when `--report` is active.
+Reviewer standard output and standard error are both captured. Standard error is forwarded to the outer process when verbose and the reviewer exits with code `2`, and recorded in the report timeline when `--report` is active.
 
 Reviewer execution has a 60-minute timeout. Timeout or spawn failures are treated as reviewer errors and do not discard the agent's answer.
 
@@ -139,9 +139,9 @@ verify = "verification/working.md"
 review_prompt = "Focus on correctness and test coverage"
 ```
 
-The `reviewer` value is shell-split; the first token is resolved via PATH when it's a bare command name, or against the config directory when it starts with `./`, `../`, or `~`. Remaining tokens are preserved as-is. The `verify` and `objective` paths resolve relative to the config directory, consistent with `allowed_dirs` and `skills_dir`.
+The `reviewer` value is shell-split; the first token is resolved via PATH when it's a bare command name, or against the config directory when it's a relative path containing a `/` (such as `./review.sh` or `scripts/review.sh`); `~` expands to your home directory. Remaining tokens are preserved as-is. The `verify` and `objective` paths resolve relative to the config directory, consistent with `allowed_dirs` and `skills_dir`.
 
-Note that `reviewer_mode` is deliberately not supported in config files. A config file with `reviewer_mode = true` would silently force every `swival` invocation into reviewer mode, breaking normal usage. `self_review` does not have this problem — the inner reviewer process inherits the config but clears the flag automatically.
+Note that `reviewer_mode` is deliberately not supported in config files. A config file with `reviewer_mode = true` would silently force every `swival` invocation into reviewer mode, breaking normal usage. `self_review` does not have this problem: the inner reviewer process inherits the config but clears the flag automatically.
 
 ## Writing A Custom Reviewer Script
 

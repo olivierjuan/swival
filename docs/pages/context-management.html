@@ -117,7 +117,7 @@
 <li><strong>Command output</strong> is returned inline up to 10KB. Anything larger is written to a temporary file and the conversation receives a short pointer with instructions to paginate.</li>
 <li><strong>MCP tool results</strong> follow the same pattern: inline up to 20KB, saved to file above that.</li>
 <li><strong>URL fetches</strong> are capped at 5MB for the raw download and 50KB for the converted output.</li>
-<li><strong>Instruction files</strong> (<code>CLAUDE.md</code>, <code>AGENTS.md</code>) are each capped at 10,000 characters.</li>
+<li><strong>Instruction files</strong> are capped at 10,000 characters: <code>CLAUDE.md</code> gets its own cap, and all <code>AGENTS.md</code> files (user-level, global, project-level) share one combined 10,000-character budget.</li>
 <li><strong>Auto-memory</strong> (<code>.swival/memory/MEMORY.md</code>) is injected through a budgeted two-part pipeline. Entries tagged with <code>&lt;!-- bootstrap --&gt;</code> are always included (up to 400 tokens). Remaining entries are ranked by BM25 relevance against the user's question and the top results are injected (up to 400 tokens). Total memory cost stays within 800 tokens even for large memory files. Use <code>--memory-full</code> to inject everything (legacy behavior).</li>
 </ul>
 <p>These limits are deliberately conservative. They prevent a single tool call from consuming a significant fraction of a small context window.</p>
@@ -173,7 +173,7 @@
 <h3 id="level-6-drop-tools-for-one-retry">Level 6: Drop Tools For One Retry</h3>
 <p>If message compaction fails and tool schemas are still attached, Swival drops all tool schemas from that retry request. This is deliberately request-local: the durable tool list is not mutated, so a later turn can restore tools immediately. Permanent no-tools mode is reserved for providers that actually raise <code>ToolsNotSupportedError</code>.</p>
 <h3 id="level-7-emergency-truncation">Level 7: Emergency Truncation</h3>
-<p>If the provider still rejects the request, Swival progressively emergency-truncates the remaining prompt at bounded ratios. It preserves the system prompt when possible and only truncates it in the final "make anything fit" stage. If even the smallest bounded request fails, the run writes a continue-here file and raises a context overflow error.</p>
+<p>If the provider still rejects the request, Swival progressively emergency-truncates the remaining prompt at bounded ratios. It preserves the system prompt when possible and only truncates it in the final "make anything fit" stage. If even the smallest bounded request fails, the run writes a continue-here file and ends the turn with an operational notice instead of an answer, so an overflow never crashes the loop.</p>
 <h2 id="knowledge-survival">Knowledge Survival</h2>
 <p>The most important design principle: critical state must survive compaction. Three mechanisms ensure this.</p>
 <h3 id="thinking-state">Thinking State</h3>

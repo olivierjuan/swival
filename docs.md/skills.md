@@ -105,9 +105,9 @@ Because injections use assistant+tool messages (not user messages), compaction c
 
 When the model decides a skill is relevant on its own, it calls `use_skill` with the skill name. Swival reads the full body from `SKILL.md` and returns it inside `<skill-instructions>` tags along with the skill directory path. For local skills, the model can also read the `SKILL.md` file directly using the path shown in the catalog.
 
-### Trigger rules in the prompt
+### Usage guidance in the prompt
 
-The catalog includes guidance telling the model that if a task clearly matches a skill's description, it should use that skill. This reduces the chance of the model ignoring available skills.
+The catalog ends with a short "How to use skills" section: call `use_skill` with the skill name to receive detailed instructions, read local skills directly from the file paths shown, and never search the filesystem for skills that show no path. The `use_skill` tool description also tells the model to use the tool instead of hunting for `SKILL.md` files. This reduces the chance of the model ignoring available skills.
 
 ## File Access For External Skills
 
@@ -117,6 +117,6 @@ Project-local skills are already inside normal sandbox roots, so they use standa
 
 A skill directory can also contain a program file (`SKILL.star`) that turns it into an Agent MetaSKILL — a dynamic workflow that runs bounded loops with nested model calls, command execution, and structured tracing. When a `SKILL.star` file is present (or the `metaskill` frontmatter field points to one), Swival exposes the `run_metaskill` tool alongside `use_skill`.
 
-MetaSKILLs use Starlark as their runtime language and expose three host functions: `ask()`, `command()`, and `trace()`. Local metaskills execute by default; external metaskills require `--metaskills all` or `metaskills = "all"` in config.
+MetaSKILLs use Starlark as their runtime language and expose three host functions: `ask()`, `command()`, and `trace()`. Execution requires the optional Starlark runtime (installed with `pip install 'swival[metaskills]'`); without it, these skills behave as ordinary static skills. Local metaskills execute by default; external metaskills require `--metaskills all` or `metaskills = "all"` in config.
 
 See the [Agent MetaSKILLs specification](metaskills.md) for the full format, host API, budgets, and authoring guide.

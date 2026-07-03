@@ -10,7 +10,7 @@ The simplest way to use AgentFS with Swival is the built-in sandbox mode:
 swival --sandbox agentfs "Refactor the auth module" --yolo
 ```
 
-This re-executes Swival inside `agentfs run` automatically. Your `--base-dir` and `--add-dir` paths are mapped to writable overlay directories; everything else is read-only to subprocesses. To persist sandbox state across runs, add `--sandbox-session <id>`.
+This re-executes Swival inside `agentfs run` automatically. Your `--base-dir` and `--add-dir` paths are mapped to writable overlay directories; everything else is read-only to subprocesses. Sandbox state persists across runs automatically through a deterministic session ID derived from the project directory; add `--sandbox-session <id>` to choose your own.
 
 See [Safety and Sandboxing](safety-and-sandboxing.md) for details on what the integrated mode enforces.
 

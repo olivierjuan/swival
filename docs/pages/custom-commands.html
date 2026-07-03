@@ -126,7 +126,7 @@ EOF
 chmod +x ~/.config/swival/commands/context
 </code></pre>
 <h3 id="text-templates">Text templates</h3>
-<p>A plain text file without the execute bit is treated as a prompt template. Its content is read and inlined directly into the conversation — no subprocess is started. The file must be valid UTF-8 and contain no null bytes (binary files are rejected with "command not executable").</p>
+<p>A plain text file without the execute bit is treated as a prompt template. Its content is read and inlined directly into the conversation; no subprocess is started. The file must be valid UTF-8 and contain no null bytes (binary files are rejected with "command not executable").</p>
 <pre><code class="language-sh">cat &gt; ~/.config/swival/commands/review &lt;&lt;'EOF'
 Review the changes in $1 for correctness, style, and test coverage. Flag any security issues first.
 EOF
@@ -185,7 +185,7 @@ Review the changes in $1 for correctness and test coverage.
 <h2 id="timeouts">Timeouts</h2>
 <p>Executable scripts have a 30-second timeout. Text templates have no timeout since no process is spawned.</p>
 <h2 id="community-commands">Community Commands</h2>
-<p>The <a href="https://github.com/Swival/swival-commands">swival-commands</a> repository has a growing collection of ready-to-use commands contributed by the community, including a full-repo security audit, a C-specific vulnerability scanner, and a pull request reviewer. Installation is just copying files into your commands directory.</p>
+<p>The <a href="https://github.com/Swival/swival-commands">swival-commands</a> repository has a growing collection of ready-to-use commands contributed by the community, including a full-repo security audit and a pull request reviewer. Installation is just copying files into your commands directory.</p>
 <p>If you have built a command that others might find useful, contributions are welcome there.</p>
 <h2 id="history">History</h2>
 <p>Custom command output is logged to <code>.swival/HISTORY.md</code> with the label <code>[!name] !name [args...]</code> so you can distinguish command-driven turns from typed input.</p>

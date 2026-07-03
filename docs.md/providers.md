@@ -40,6 +40,8 @@ swival --profile gpt5 "hard task"
 swival> /profile gpt5
 ```
 
+Profiles switch the whole stack at once. To change only the model within the current provider, use the `/model` command in the REPL: with no argument it opens an interactive picker over the models the provider can serve right now, `/model NAME` switches directly, and favorites you star in the picker are remembered across sessions. Bedrock, GEAP, and the command provider have no model listing, but `/model ID` still works. See [Usage](usage.md) for the details.
+
 The sections below document each provider's flags, authentication, and behavior in detail.
 
 ## LM Studio
@@ -451,15 +453,15 @@ Because the external program handles all model routing, there is no auto-discove
 
 For providers that support explicit cache annotations, Swival automatically marks the system message as cacheable each turn. This avoids re-processing the system prompt and tool schemas on every call, which typically saves 30–60% of input token costs in long sessions.
 
-| Provider                     | Caching mechanism                           | Notes                                                           |
-| ---------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
-| Anthropic (via OpenRouter)   | Explicit `cache_control` injected by Swival | System message cached; tool schemas not cached in Phase 1       |
-| Google Gemini                | Explicit `cache_control` injected by Swival | Via `openrouter/google/...` or native `google` provider         |
-| AWS Bedrock                  | Explicit `cache_control` injected by Swival | Supported for Anthropic models on Bedrock                       |
-| OpenAI / Deepseek            | Automatic (provider-side)                   | No annotation needed; prompts >1024 tokens cached automatically |
-| LM Studio                    | None                                        | Local inference, no server-side cache                           |
-| Vertex AI (`geap`/`vertexai`)| None                                        | Excluded: Vertex AI rejects cached content when tools or system instructions are in the same request |
-| Generic with custom base_url | Best effort                                 | Annotation injected only when LiteLLM recognizes the model as cache-capable |
+| Provider                      | Caching mechanism                           | Notes                                                                                                |
+| ----------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Anthropic (via OpenRouter)    | Explicit `cache_control` injected by Swival | System message cached; tool schemas not cached in Phase 1                                            |
+| Google Gemini                 | Explicit `cache_control` injected by Swival | Via `openrouter/google/...` or native `google` provider                                              |
+| AWS Bedrock                   | Explicit `cache_control` injected by Swival | Supported for Anthropic models on Bedrock                                                            |
+| OpenAI / Deepseek             | Automatic (provider-side)                   | No annotation needed; prompts >1024 tokens cached automatically                                      |
+| LM Studio                     | None                                        | Local inference, no server-side cache                                                                |
+| Vertex AI (`geap`/`vertexai`) | None                                        | Excluded: Vertex AI rejects cached content when tools or system instructions are in the same request |
+| Generic with custom base_url  | Best effort                                 | Annotation injected only when LiteLLM recognizes the model as cache-capable                          |
 
 Cache annotation is applied automatically when the model is known to support it (Swival defers to LiteLLM's `supports_prompt_caching` check). It is injected for every provider except LM Studio and Vertex AI; if the call succeeds with a provider that ignores the annotation, the extra field is silently dropped.
 

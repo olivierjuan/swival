@@ -25,7 +25,7 @@ brew trust swival/tap
 brew install swival/tap/swival
 ```
 
-This builds from source and pulls in Python 3.13 automatically. The first install takes a while because several dependencies compile native extensions.
+This builds from source and pulls in Python 3.14 automatically. The first install takes a while because several dependencies compile native extensions.
 
 ## Upgrading
 
@@ -42,6 +42,10 @@ To remove it:
 uv tool uninstall swival  # if installed with uv
 brew uninstall swival     # if installed with Homebrew
 ```
+
+## First-Run Setup
+
+The first time you run `swival` on an interactive terminal with no config, a short setup wizard offers to walk you through picking a provider. It writes a global config file to `~/.config/swival/config.toml` with your choices stored as a default profile, so later runs need no flags. You can skip it, or choose "Don't show this again" to suppress it for good. The wizard stays out of the way whenever a config file already exists or you pass `--provider` or `--profile` explicitly, so none of the commands below will trigger it.
 
 ## Provider Quick Reference
 

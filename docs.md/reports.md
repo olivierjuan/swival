@@ -100,7 +100,7 @@ A `success` outcome means the model produced a final non-tool response. An `exha
 
 `turns` is the highest completed turn number for the run. `llm_calls` is total logical LLM calls (each `call_llm()` invocation counts as one, regardless of internal provider retries), including retries after compaction. `total_llm_time_s` and `total_tool_time_s` are wall-clock totals in seconds.
 
-`tool_calls_total`, `tool_calls_succeeded`, and `tool_calls_failed` are aggregate tool counters. `tool_calls_by_name` is a per-tool breakdown using `{succeeded, failed}` counts.
+`tool_calls_total`, `tool_calls_succeeded`, and `tool_calls_failed` are aggregate tool counters. `tool_calls_by_name` is a per-tool breakdown using `{succeeded, failed}` counts; a `repairs` count is added for tools whose truncated arguments needed structural repair.
 
 `compactions` counts history-mutating compaction passes. Because a single proactive or reactive pass walks the ladder and can apply several rungs at once, the recorded `strategy` may be a `+`-joined combination such as `gc_scaffolding+compact_messages` or `compact_messages+strip_reasoning_content`. `turn_drops` counts passes that dropped middle turns — any pass whose `strategy` includes the `drop_middle_turns` rung, on its own or combined with others — and those passes are not also counted under `compactions`. Request-local tool drops are reported on the retrying `llm_call`, not as history compactions. `guardrail_interventions` counts injected correction prompts for repeated tool failures. `recovered_responses` counts model outputs that could not be used as emitted and triggered a recovery step, such as output cut off by the token limit, tool calls with malformed JSON arguments, or tool-call markup leaked into the text channel.
 
@@ -118,21 +118,23 @@ A `success` outcome means the model produced a final non-tool response. An `exha
 
 `security` appears when at least one security-relevant event occurred during the run. It is an object with `command_policy_blocks` (commands denied by policy or by user), `command_policy_approvals` (commands approved by user or config), and `untrusted_inputs` (external content ingested from `fetch_url`, MCP, or A2A). All fields are integers. Absent when all counters are zero.
 
+`lifecycle` appears when lifecycle hooks ran and is an array mirroring the timeline's `lifecycle` events.
+
 ### `timeline`
 
 `timeline` is an ordered array of event objects. Each event includes `type`, and most include `turn` (the turn number when the event occurred). Review events are an exception — they include `round` instead of `turn` since they occur between agent loop iterations.
 
-For `llm_call`, fields include `duration_s`, `prompt_tokens_est`, `finish_reason`, `is_retry`, and optionally `provider_retries` (number of transient-error retries within this call; omitted when 0). Retry calls include `retry_reason`, the compaction strategy that produced the retried request shape. Like the `compaction` event's `strategy`, it is a single rung (`gc_scaffolding`, `compact_messages`, `strip_reasoning_content`, `drop_middle_turns`, `aggressive_drop`, `drop_tools`, or `emergency_truncate`) or a `+`-joined combination of them. Prompt cache counts are not recorded per call; they are summed into the run-level `stats.prompt_cache` object instead.
+For `llm_call`, fields include `duration_s`, `prompt_tokens_est`, `finish_reason`, `is_retry`, and optionally `provider_retries` (number of transient-error retries within this call; omitted when 0). Retry calls include `retry_reason`, the compaction strategy that produced the retried request shape. Like the `compaction` event's `strategy`, it is a single rung (`gc_scaffolding`, `compact_messages`, `strip_reasoning_content`, `drop_middle_turns`, `aggressive_drop`, `drop_tools`, or `emergency_truncate`) or a `+`-joined combination of them. Three non-rung values also appear: `drop_tools_unsupported` when the provider rejected function calling and the call was retried without tools, and `terminal_floor` or `terminal_floor_backstop` when a minimal fixed-budget prompt succeeded after the compaction ladder gave up. Prompt cache counts are not recorded per call; they are summed into the run-level `stats.prompt_cache` object instead.
 
 For `tool_call`, fields include `name`, `arguments`, `succeeded`, `duration_s`, and `result_length`. If arguments were invalid JSON, `arguments` is `null`. Failed tool calls include `error`.
 
-For `compaction`, fields include `strategy`, `tokens_before`, and `tokens_after`. `strategy` is the rung or rungs applied in that pass — one of `gc_scaffolding`, `compact_messages`, `strip_reasoning_content`, `drop_middle_turns`, `aggressive_drop`, or `emergency_truncate`, or a `+`-joined combination when several ran together in a single pass.
+For `compaction`, fields include `strategy`, `tokens_before`, and `tokens_after`. `strategy` is the rung or rungs applied in that pass: one of `gc_scaffolding`, `compact_messages`, `strip_reasoning_content`, `drop_middle_turns`, `aggressive_drop`, or `emergency_truncate`, or a `+`-joined combination when several ran together in a single pass. `drop_tools` can appear inside a combination; a pass that only dropped tools mutates no history and is not recorded as a compaction event.
 
 For `guardrail`, fields include `tool` and `level`, where `level` is `nudge` for repeated failures and `stop` for stronger intervention.
 
 For `review`, fields include `round`, `exit_code`, and `feedback` (reviewer standard output). When the reviewer produces standard error output, `stderr` is also included.
 
-For `recovered_response`, the event marks an LLM response that was not directly usable and prompted a recovery step. The optional `reason` field is `length` (output cut off by the token limit), `malformed_args` (tool call with unparseable JSON arguments), or `textual_tool_call_leak` (tool-call markup emitted as plain text). It is omitted for a plain text response truncated by the output limit.
+For `recovered_response`, the event marks an LLM response that was not directly usable and prompted a recovery step. The optional `reason` field is `length` (output cut off by the token limit), `malformed_args` (tool call with unparseable JSON arguments), `textual_tool_call_leak` (tool-call markup emitted as plain text), or `context_exhausted` (even the smallest recovery prompt was rejected and the turn ended with an operational notice). It is omitted for a plain text response truncated by the output limit.
 
 For `truncation_repair`, the event records a salvaged tool-call payload. Fields include `name`, `original_length`, and `repaired_length`, plus an optional `notes` array describing the repairs and an optional `original_preview` snippet of the truncated argument.
 

@@ -176,12 +176,12 @@ auth_token = &quot;sk-...&quot;
 model = &quot;gpt-5.5&quot;
 </code></pre>
 <p>Relative paths in <code>allowed_dirs</code>, <code>allowed_dirs_ro</code>, <code>skills_dir</code>, <code>cache_dir</code>, <code>objective</code>, and <code>verify</code> resolve against the config file's parent directory, not the working directory. Tilde paths like <code>~/projects</code> expand to the home directory.</p>
-<p>The <code>reviewer</code>, <code>llm_filter</code>, <code>lifecycle_command</code>, and <code>command_middleware</code> values are shell-split; only path-like first tokens — anything starting with <code>/</code>, <code>~</code>, or containing a <code>/</code> (e.g. <code>./</code>, <code>../</code>, <code>.rtk/</code>, <code>scripts/</code>) — are resolved against the config directory, while bare command names like <code>swival</code> are left for PATH lookup at runtime. The same resolution applies to <code>model</code> when <code>provider = "command"</code>.</p>
-<p>If a project config contains <code>api_key</code> — at the top level or inside a profile — inside a git repository, Swival prints a warning because the key could be committed accidentally. Prefer environment variables for credentials.</p>
-<p>The <code>--system-prompt</code> and <code>no_system_prompt</code> settings are mutually exclusive in config files, just as they are on the command line.</p>
-<p>The library API (<code>Session</code> class) does not auto-load config files. If you want config file support in library code, call <code>load_config()</code> and <code>config_to_session_kwargs()</code> explicitly. Note that <code>config_to_session_kwargs()</code> drops <code>approved_buckets</code> — for <code>commands="ask"</code>, pass <code>approved_buckets</code> to <code>Session</code> directly, optionally using <code>load_persisted_buckets()</code> from <code>swival.command_policy</code> to include runtime-persisted approvals.</p>
+<p>The <code>reviewer</code>, <code>llm_filter</code>, <code>lifecycle_command</code>, and <code>command_middleware</code> values are shell-split; only path-like first tokens (anything starting with <code>/</code>, <code>~</code>, or containing a <code>/</code>, e.g. <code>./</code>, <code>../</code>, <code>.rtk/</code>, <code>scripts/</code>) are resolved against the config directory, while bare command names like <code>swival</code> are left for PATH lookup at runtime. The same resolution applies to <code>model</code> when <code>provider = "command"</code>.</p>
+<p>If a project config inside a git repository contains <code>api_key</code>, at the top level or inside a profile, Swival prints a warning because the key could be committed accidentally. Prefer environment variables for credentials.</p>
+<p>The <code>system_prompt</code> and <code>no_system_prompt</code> settings are mutually exclusive in config files, just as the matching flags are on the command line.</p>
+<p>The library API (<code>Session</code> class) does not auto-load config files. If you want config file support in library code, call <code>load_config()</code> and <code>config_to_session_kwargs()</code> explicitly. Note that <code>config_to_session_kwargs()</code> drops <code>approved_buckets</code>: for <code>commands="ask"</code>, pass <code>approved_buckets</code> to <code>Session</code> directly, optionally using <code>load_persisted_buckets()</code> from <code>swival.command_policy</code> to include runtime-persisted approvals.</p>
 <h2 id="profiles">Profiles</h2>
-<p>If you switch between multiple model setups — a local LM Studio model for quick tasks, a ChatGPT model for hard problems, an OpenRouter model for long-context work — profiles let you define each setup once and switch with a single flag.</p>
+<p>If you switch between multiple model setups (a local LM Studio model for quick tasks, a ChatGPT model for hard problems, an OpenRouter model for long-context work), profiles let you define each setup once and switch with a single flag.</p>
 <pre><code class="language-toml">active_profile = &quot;fast-local&quot;
 
 [profiles.fast-local]
@@ -213,7 +213,7 @@ swival --profile fast-local &quot;write tests&quot;
 <pre><code class="language-sh">swival --list-profiles
 </code></pre>
 <p>Each profile requires <code>provider</code>. The allowed keys are: <code>provider</code>, <code>model</code>, <code>api_key</code>, <code>user_agent</code>, <code>base_url</code>, <code>aws_profile</code>, <code>project</code>, <code>location</code>, <code>max_output_tokens</code>, <code>max_context_tokens</code>, <code>temperature</code>, <code>top_p</code>, <code>seed</code>, <code>extra_body</code>, <code>reasoning_effort</code>, <code>sanitize_thinking</code>, <code>show_thinking</code>, and <code>description</code>.</p>
-<p>Keys outside this set, like <code>files</code>, <code>commands</code>, or <code>reviewer</code>, are rejected with an error listing the allowed keys. Profiles are for choosing a model stack, not for changing agent behavior. The <code>description</code> key is metadata: it appears in profile listings but is not passed to the provider.</p>
+<p>Keys outside this set, like <code>files</code>, <code>commands</code>, or <code>reviewer</code>, are rejected with an error listing the allowed keys. Profiles are for choosing a model stack, not for changing agent behavior. The <code>description</code> key is metadata: a free-form note for yourself that is never passed to the provider.</p>
 <p>If <code>--profile</code> is combined with explicit flags like <code>--provider</code> or <code>--model</code>, the explicit flags win on a per-key basis, just like CLI flags override config everywhere else in Swival.</p>
 <pre><code class="language-sh">swival --profile gpt5 --reasoning-effort medium &quot;task&quot;
 </code></pre>
@@ -227,13 +227,13 @@ provider = &quot;huggingface&quot;
 <pre><code class="language-sh">swival &quot;everyday task&quot;
 swival --model &quot;Qwen/Qwen3-Coder&quot; &quot;task needing a different model&quot;
 </code></pre>
-<p>Any model supported by the inference endpoint works — no extra profile needed.</p>
+<p>Any model supported by the inference endpoint works, no extra profile needed.</p>
 <p>You can also switch profiles mid-session from the REPL without restarting:</p>
 <pre><code class="language-text">swival&gt; /profile              # list profiles, active one marked with →
 swival&gt; /profile fast-local   # switch to the &quot;fast-local&quot; profile
 swival&gt; /profile -            # revert to the profile active at session start
 </code></pre>
-<p>Switching only changes LLM settings — conversation history, tools, files, and all other state are preserved. New subagents spawned after the switch use the new profile; existing running subagents are unaffected.</p>
+<p>Switching only changes LLM settings: conversation history, tools, files, and all other state are preserved. New subagents spawned after the switch use the new profile; existing running subagents are unaffected.</p>
 <p>Profiles defined in global config and project config merge per-key for the same profile name. A project can refine a global profile by overriding just one or two keys without copying the whole table.</p>
 <pre><code class="language-toml"># In global config: defines the base profile
 [profiles.shared]
@@ -245,19 +245,28 @@ max_context_tokens = 131072
 [profiles.shared]
 model = &quot;z-ai/glm-5-mini&quot;
 </code></pre>
+<h2 id="switching-models-mid-session">Switching Models Mid-Session</h2>
+<p>When you only want a different model from the same provider, <code>/model</code> in the REPL is lighter than a profile switch:</p>
+<pre><code class="language-text">swival&gt; /model                # open an interactive model picker
+swival&gt; /model glm-5.2        # switch directly, fuzzy-matched against the provider catalog
+swival&gt; /model -              # revert to the model used before the last switch
+swival&gt; /model --fav          # toggle the current model as a favorite
+swival&gt; /model --fav ID       # toggle a favorite for a specific model
+</code></pre>
+<p><code>/model</code> stays within the current provider, so reasoning effort, <code>extra_body</code>, caching, and authentication carry over unchanged. The picker lists favorites first (toggle them with <code>*</code> inside the picker), then the current model, then recent picks; favorites and recents also feed TAB completion for <code>/model</code> arguments. They are stored per provider in <code>~/.config/swival/models.toml</code>, a file managed by <code>/model</code> that is safe to hand-edit. As with <code>/profile</code>, a switch applies to subagents spawned afterwards but not to ones already running.</p>
 <h2 id="instruction-files">Instruction Files</h2>
 <p>Swival loads instruction files during startup and appends them to the system prompt. <code>CLAUDE.md</code> provides project rules (<code>&lt;project-instructions&gt;</code>), while <code>AGENTS.md</code> provides agent workflow commands and conventions (<code>&lt;agent-instructions&gt;</code>). Use <code>/init</code> in the REPL to auto-generate a project-level <code>AGENTS.md</code>, or <code>/remember &lt;text&gt;</code> to add individual facts to its <code>## Conventions</code> section.</p>
 <h3 id="claudemd">CLAUDE.md</h3>
 <p>Loaded from the project base directory only. Capped at 10,000 characters.</p>
 <h3 id="agentsmd">AGENTS.md</h3>
-<p>Loaded from up to three locations, in this order:</p>
+<p>Loaded from up to three levels, in this order:</p>
 <ol>
 <li><strong>User-level</strong>: <code>~/.config/swival/AGENTS.md</code> (or <code>$XDG_CONFIG_HOME/swival/AGENTS.md</code>)</li>
 <li><strong>Global cross-agent</strong>: <code>~/.agents/AGENTS.md</code></li>
 <li><strong>Project-level</strong>: <code>&lt;base-dir&gt;/AGENTS.md</code></li>
 </ol>
-<p>All are optional. Content is concatenated inside a single <code>&lt;agent-instructions&gt;</code> block sharing a combined 10,000 character budget. Files are read in the order shown; earlier files get budget priority.</p>
-<p>The user-level file is for swival-specific personal conventions. The global file (<code>~/.agents/AGENTS.md</code>) follows the cross-agent standard shared with OpenCode, OpenHands, and similar tools — put conventions here that should apply regardless of which agent you're using. The project-level file is for project-specific rules.</p>
+<p>All are optional. Content is concatenated inside a single <code>&lt;agent-instructions&gt;</code> block sharing a combined 10,000 character budget. Files are read in the order shown; earlier files get budget priority. When you start Swival from a subdirectory of the project root, the project level also picks up an <code>AGENTS.md</code> from each directory on the path from the root down to where you started, general to specific.</p>
+<p>The user-level file is for swival-specific personal conventions. The global file (<code>~/.agents/AGENTS.md</code>) follows the cross-agent standard shared with OpenCode, OpenHands, and similar tools; put conventions here that should apply regardless of which agent you're using. The project-level file is for project-specific rules.</p>
 <pre><code class="language-markdown">This is a Go project using Chi for routing. Tests use testify.
 Always run `go test ./...` after making changes.
 Don't add dependencies without asking.
@@ -315,7 +324,7 @@ Don't add dependencies without asking.
 <p>In the library API:</p>
 <pre><code class="language-python">session = Session(reasoning_effort=&quot;high&quot;)
 </code></pre>
-<p>Valid levels are <code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, and <code>default</code>. Not all models support this parameter — when used with a model that doesn't support it, the behavior depends on the provider (it may be ignored or cause an error). Only set it when you know your model supports it.</p>
+<p>Valid levels are <code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, and <code>default</code>. Not all models support this parameter. When used with a model that doesn't support it, the behavior depends on the provider (it may be ignored or cause an error). Only set it when you know your model supports it.</p>
 <h2 id="thinking-tag-sanitization">Thinking Tag Sanitization</h2>
 <p>Some open-weight models leak hidden-reasoning markers like <code>&lt;think&gt;</code> and <code>&lt;/think&gt;</code> into their responses. This is especially common when using vLLM as the inference engine, where models may emit these tags even when thinking mode is disabled. The <code>sanitize_thinking</code> option strips these leaked tags from assistant content before returning it to the user.</p>
 <p>This is off by default for all providers. Enable it in config if you're seeing leaked thinking tags:</p>
@@ -324,9 +333,9 @@ Don't add dependencies without asking.
 <p>In the library API:</p>
 <pre><code class="language-python">session = Session(sanitize_thinking=True)
 </code></pre>
-<p>The sanitizer strips <code>&lt;think&gt;...&lt;/think&gt;</code> blocks, standalone <code>&lt;think&gt;</code> / <code>&lt;/think&gt;</code> lines, and special tokens like <code>&lt;|start_header_id|&gt;</code>. Inline mentions of these tags in code examples or backtick-quoted text are preserved.</p>
+<p>The sanitizer strips <code>&lt;think&gt;...&lt;/think&gt;</code> blocks, standalone <code>&lt;think&gt;</code> / <code>&lt;/think&gt;</code> lines, and special tokens like <code>&lt;|start_header_id|&gt;</code>. Think tags mentioned mid-line (in backticks, for example) are preserved, but a tag alone on its own line is stripped even inside a code example, and special tokens are removed wherever they appear.</p>
 <h2 id="showing-streamed-thinking">Showing Streamed Thinking</h2>
-<p>When a reasoning model streams its thinking, Swival shows it live under a <code>thinking…</code> header while you wait. That live region is transient — it gets wiped from the terminal the moment the answer is reprinted. The <code>show_thinking</code> option keeps the full thinking in your scrollback instead, reprinting it to stderr after the answer. Without it, you get a collapsed one-line note (<code>thinking: N lines, hidden</code>) so the wipe isn't jarring.</p>
+<p>When a reasoning model streams its thinking, Swival shows it live under a <code>thinking…</code> header while you wait. That live region is transient: it gets wiped from the terminal the moment the answer is reprinted. The <code>show_thinking</code> option keeps the full thinking in your scrollback instead, reprinting it to stderr once the stream finishes. Without it, you get a collapsed one-line note (<code>thinking: N lines / ~M tokens, hidden</code>) so the wipe isn't jarring.</p>
 <p>It is off by default. The thinking is a display-only artifact: it goes to stderr, never to stdout, history, traces, or reports. Showing it requires a verbose, interactive terminal and a provider that streams reasoning deltas.</p>
 <pre><code class="language-toml">show_thinking = true
 </code></pre>

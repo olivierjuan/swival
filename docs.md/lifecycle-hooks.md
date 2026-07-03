@@ -58,7 +58,8 @@ The startup hook runs after:
 - Config file loading and CLI flag merging
 - Provider and model resolution
 - Git metadata discovery
-- `.swival/` directory creation
+
+The `.swival/` directory is not guaranteed to exist yet; a hook that writes into it should `mkdir -p` first (the example script below does).
 
 It runs before:
 
@@ -85,7 +86,9 @@ Hooks run once on process start and once on process exit. They do not run per pr
 
 ### Reviewer and Serve Modes
 
-Hooks are not run in `--reviewer-mode` or `--serve`. Reviewer mode is a subprocess of the main Swival invocation — running hooks there would cause nested syncs. Serve mode manages per-request sessions with different lifecycle semantics that will be addressed separately.
+Hooks are not run in `--reviewer-mode`. Reviewer mode is a subprocess of the main Swival invocation; running hooks there would cause nested syncs.
+
+In `--serve`, the server process itself runs no hooks, but each per-context session it creates inherits the lifecycle settings: the startup hook runs when a context's session is first used, and the exit hook runs when that session is evicted or closed. Pass `--no-lifecycle` if you do not want per-session hooks in a long-lived server.
 
 ## Environment Variables
 
@@ -300,7 +303,7 @@ The example script above does not do this. It always syncs to `heads/<sha>`, whi
 
 **Reviewer and self-review:** Hooks do not run in `--reviewer-mode`. Self-review spawns a reviewer subprocess, but that subprocess gets `--reviewer-mode`, so it also skips hooks. No nested sync.
 
-**A2A serve:** Hooks are excluded from `--serve` in this release. Per-session hooks for long-lived A2A servers need different lifecycle semantics and will be addressed separately.
+**A2A serve:** The `--serve` process itself does not run hooks, but the per-context sessions it creates inherit the lifecycle settings and run startup and exit hooks per session (exit fires when a session is evicted or closed). Use `--no-lifecycle` to disable hooks in a long-lived server.
 
 **AgentFS sandbox:** Hooks run in the same process context as Swival. If you are running inside an AgentFS sandbox, the hook script needs network access to reach the remote storage backend.
 

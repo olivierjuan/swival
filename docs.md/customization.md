@@ -91,17 +91,17 @@ model = "gpt-5.5"
 
 Relative paths in `allowed_dirs`, `allowed_dirs_ro`, `skills_dir`, `cache_dir`, `objective`, and `verify` resolve against the config file's parent directory, not the working directory. Tilde paths like `~/projects` expand to the home directory.
 
-The `reviewer`, `llm_filter`, `lifecycle_command`, and `command_middleware` values are shell-split; only path-like first tokens — anything starting with `/`, `~`, or containing a `/` (e.g. `./`, `../`, `.rtk/`, `scripts/`) — are resolved against the config directory, while bare command names like `swival` are left for PATH lookup at runtime. The same resolution applies to `model` when `provider = "command"`.
+The `reviewer`, `llm_filter`, `lifecycle_command`, and `command_middleware` values are shell-split; only path-like first tokens (anything starting with `/`, `~`, or containing a `/`, e.g. `./`, `../`, `.rtk/`, `scripts/`) are resolved against the config directory, while bare command names like `swival` are left for PATH lookup at runtime. The same resolution applies to `model` when `provider = "command"`.
 
-If a project config contains `api_key` — at the top level or inside a profile — inside a git repository, Swival prints a warning because the key could be committed accidentally. Prefer environment variables for credentials.
+If a project config inside a git repository contains `api_key`, at the top level or inside a profile, Swival prints a warning because the key could be committed accidentally. Prefer environment variables for credentials.
 
-The `--system-prompt` and `no_system_prompt` settings are mutually exclusive in config files, just as they are on the command line.
+The `system_prompt` and `no_system_prompt` settings are mutually exclusive in config files, just as the matching flags are on the command line.
 
-The library API (`Session` class) does not auto-load config files. If you want config file support in library code, call `load_config()` and `config_to_session_kwargs()` explicitly. Note that `config_to_session_kwargs()` drops `approved_buckets` — for `commands="ask"`, pass `approved_buckets` to `Session` directly, optionally using `load_persisted_buckets()` from `swival.command_policy` to include runtime-persisted approvals.
+The library API (`Session` class) does not auto-load config files. If you want config file support in library code, call `load_config()` and `config_to_session_kwargs()` explicitly. Note that `config_to_session_kwargs()` drops `approved_buckets`: for `commands="ask"`, pass `approved_buckets` to `Session` directly, optionally using `load_persisted_buckets()` from `swival.command_policy` to include runtime-persisted approvals.
 
 ## Profiles
 
-If you switch between multiple model setups — a local LM Studio model for quick tasks, a ChatGPT model for hard problems, an OpenRouter model for long-context work — profiles let you define each setup once and switch with a single flag.
+If you switch between multiple model setups (a local LM Studio model for quick tasks, a ChatGPT model for hard problems, an OpenRouter model for long-context work), profiles let you define each setup once and switch with a single flag.
 
 ```toml
 active_profile = "fast-local"
@@ -144,7 +144,7 @@ swival --list-profiles
 
 Each profile requires `provider`. The allowed keys are: `provider`, `model`, `api_key`, `user_agent`, `base_url`, `aws_profile`, `project`, `location`, `max_output_tokens`, `max_context_tokens`, `temperature`, `top_p`, `seed`, `extra_body`, `reasoning_effort`, `sanitize_thinking`, `show_thinking`, and `description`.
 
-Keys outside this set, like `files`, `commands`, or `reviewer`, are rejected with an error listing the allowed keys. Profiles are for choosing a model stack, not for changing agent behavior. The `description` key is metadata: it appears in profile listings but is not passed to the provider.
+Keys outside this set, like `files`, `commands`, or `reviewer`, are rejected with an error listing the allowed keys. Profiles are for choosing a model stack, not for changing agent behavior. The `description` key is metadata: a free-form note for yourself that is never passed to the provider.
 
 If `--profile` is combined with explicit flags like `--provider` or `--model`, the explicit flags win on a per-key basis, just like CLI flags override config everywhere else in Swival.
 
@@ -168,7 +168,7 @@ swival "everyday task"
 swival --model "Qwen/Qwen3-Coder" "task needing a different model"
 ```
 
-Any model supported by the inference endpoint works — no extra profile needed.
+Any model supported by the inference endpoint works, no extra profile needed.
 
 You can also switch profiles mid-session from the REPL without restarting:
 
@@ -178,7 +178,7 @@ swival> /profile fast-local   # switch to the "fast-local" profile
 swival> /profile -            # revert to the profile active at session start
 ```
 
-Switching only changes LLM settings — conversation history, tools, files, and all other state are preserved. New subagents spawned after the switch use the new profile; existing running subagents are unaffected.
+Switching only changes LLM settings: conversation history, tools, files, and all other state are preserved. New subagents spawned after the switch use the new profile; existing running subagents are unaffected.
 
 Profiles defined in global config and project config merge per-key for the same profile name. A project can refine a global profile by overriding just one or two keys without copying the whole table.
 
@@ -194,6 +194,20 @@ max_context_tokens = 131072
 model = "z-ai/glm-5-mini"
 ```
 
+## Switching Models Mid-Session
+
+When you only want a different model from the same provider, `/model` in the REPL is lighter than a profile switch:
+
+```text
+swival> /model                # open an interactive model picker
+swival> /model glm-5.2        # switch directly, fuzzy-matched against the provider catalog
+swival> /model -              # revert to the model used before the last switch
+swival> /model --fav          # toggle the current model as a favorite
+swival> /model --fav ID       # toggle a favorite for a specific model
+```
+
+`/model` stays within the current provider, so reasoning effort, `extra_body`, caching, and authentication carry over unchanged. The picker lists favorites first (toggle them with `*` inside the picker), then the current model, then recent picks; favorites and recents also feed TAB completion for `/model` arguments. They are stored per provider in `~/.config/swival/models.toml`, a file managed by `/model` that is safe to hand-edit. As with `/profile`, a switch applies to subagents spawned afterwards but not to ones already running.
+
 ## Instruction Files
 
 Swival loads instruction files during startup and appends them to the system prompt. `CLAUDE.md` provides project rules (`<project-instructions>`), while `AGENTS.md` provides agent workflow commands and conventions (`<agent-instructions>`). Use `/init` in the REPL to auto-generate a project-level `AGENTS.md`, or `/remember <text>` to add individual facts to its `## Conventions` section.
@@ -204,15 +218,15 @@ Loaded from the project base directory only. Capped at 10,000 characters.
 
 ### AGENTS.md
 
-Loaded from up to three locations, in this order:
+Loaded from up to three levels, in this order:
 
 1. **User-level**: `~/.config/swival/AGENTS.md` (or `$XDG_CONFIG_HOME/swival/AGENTS.md`)
 2. **Global cross-agent**: `~/.agents/AGENTS.md`
 3. **Project-level**: `<base-dir>/AGENTS.md`
 
-All are optional. Content is concatenated inside a single `<agent-instructions>` block sharing a combined 10,000 character budget. Files are read in the order shown; earlier files get budget priority.
+All are optional. Content is concatenated inside a single `<agent-instructions>` block sharing a combined 10,000 character budget. Files are read in the order shown; earlier files get budget priority. When you start Swival from a subdirectory of the project root, the project level also picks up an `AGENTS.md` from each directory on the path from the root down to where you started, general to specific.
 
-The user-level file is for swival-specific personal conventions. The global file (`~/.agents/AGENTS.md`) follows the cross-agent standard shared with OpenCode, OpenHands, and similar tools — put conventions here that should apply regardless of which agent you're using. The project-level file is for project-specific rules.
+The user-level file is for swival-specific personal conventions. The global file (`~/.agents/AGENTS.md`) follows the cross-agent standard shared with OpenCode, OpenHands, and similar tools; put conventions here that should apply regardless of which agent you're using. The project-level file is for project-specific rules.
 
 ```markdown
 This is a Go project using Chi for routing. Tests use testify.
@@ -326,7 +340,7 @@ In the library API:
 session = Session(reasoning_effort="high")
 ```
 
-Valid levels are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `default`. Not all models support this parameter — when used with a model that doesn't support it, the behavior depends on the provider (it may be ignored or cause an error). Only set it when you know your model supports it.
+Valid levels are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `default`. Not all models support this parameter. When used with a model that doesn't support it, the behavior depends on the provider (it may be ignored or cause an error). Only set it when you know your model supports it.
 
 ## Thinking Tag Sanitization
 
@@ -344,11 +358,11 @@ In the library API:
 session = Session(sanitize_thinking=True)
 ```
 
-The sanitizer strips `<think>...</think>` blocks, standalone `<think>` / `</think>` lines, and special tokens like `<|start_header_id|>`. Inline mentions of these tags in code examples or backtick-quoted text are preserved.
+The sanitizer strips `<think>...</think>` blocks, standalone `<think>` / `</think>` lines, and special tokens like `<|start_header_id|>`. Think tags mentioned mid-line (in backticks, for example) are preserved, but a tag alone on its own line is stripped even inside a code example, and special tokens are removed wherever they appear.
 
 ## Showing Streamed Thinking
 
-When a reasoning model streams its thinking, Swival shows it live under a `thinking…` header while you wait. That live region is transient — it gets wiped from the terminal the moment the answer is reprinted. The `show_thinking` option keeps the full thinking in your scrollback instead, reprinting it to stderr after the answer. Without it, you get a collapsed one-line note (`thinking: N lines, hidden`) so the wipe isn't jarring.
+When a reasoning model streams its thinking, Swival shows it live under a `thinking…` header while you wait. That live region is transient: it gets wiped from the terminal the moment the answer is reprinted. The `show_thinking` option keeps the full thinking in your scrollback instead, reprinting it to stderr once the stream finishes. Without it, you get a collapsed one-line note (`thinking: N lines / ~M tokens, hidden`) so the wipe isn't jarring.
 
 It is off by default. The thinking is a display-only artifact: it goes to stderr, never to stdout, history, traces, or reports. Showing it requires a verbose, interactive terminal and a provider that streams reasoning deltas.
 

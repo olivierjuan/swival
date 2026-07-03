@@ -192,11 +192,11 @@ swival skills delete --global ponytail-gain  # from ~/.config/swival/skills/
 swival skills delete --library pony                 # the whole collection
 </code></pre>
 <p>Deletion happens immediately, with no confirmation prompt, but Swival always prints exactly what it removed:</p>
-<pre><code>Removed skill ponytail/ponytail-help from the library
+<pre><code>Removed skill pony/ponytail-help from the library
 Removed collection 'pony' from the library
 </code></pre>
 <h2 id="a-note-on-safety">A Note On Safety</h2>
-<p>Cloning and staging never execute anything. Helper scripts and <code>SKILL.star</code> metaskills that ship inside a skill sit inert until you both install the skill and, for external metaskills, pass <code>--metaskills all</code>. Swival flags any installed skill that carries a <code>SKILL.star</code>, so a downloaded metaskill can't quietly become runnable. Clones run with credential prompts disabled, HTTP redirects refused, and non-git protocols blocked, and any URL that resolves to a private or internal address is rejected outright.</p>
+<p>Cloning and staging never execute anything. Helper scripts and <code>SKILL.star</code> metaskills that ship inside a skill sit inert until you both install the skill and, for external metaskills, pass <code>--metaskills all</code>. Swival flags any installed skill that carries a <code>SKILL.star</code>, so a downloaded metaskill can't quietly become runnable. Clones run with credential prompts disabled, HTTP redirects refused, and non-git protocols blocked, and any HTTP(S) URL that resolves to a private or internal address is rejected outright (an explicit localhost host is exempt).</p>
 <p>For everything about authoring skills, discovery precedence, and progressive disclosure, see the <a href="skills.html">Skills</a> page. For the metaskill format and host API, see <a href="metaskills.html">Agent MetaSKILLs</a>.</p>
             <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="skills.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">Skills</span></a><a class="nav-next" href="metaskills.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Metaskills</span></a></nav>
         </article>

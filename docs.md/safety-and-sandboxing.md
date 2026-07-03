@@ -59,7 +59,7 @@ Pass `--sandbox nono` to run Swival inside a [nono](https://nono.sh) sandbox. Li
 swival --sandbox nono "Refactor the auth module" --yolo
 ```
 
-The base directory is granted read+write (so the agent can edit your project), and each `--add-dir` path becomes an additional grant. nono's default system-path allowances cover the Python interpreter and standard libraries. If Swival is installed under an unusual prefix that nono does not allow by default, add that directory with `--add-dir` so the interpreter stays reachable.
+The base directory is granted read+write (so the agent can edit your project), and each `--add-dir` path becomes an additional grant. nono's default system-path allowances cover the Python interpreter and standard libraries, and Swival adds read-only grants for its own install location and the interpreter prefixes, so the re-exec'd process stays importable no matter how Swival was installed.
 
 Unlike AgentFS, nono enforces by path rather than overlaying the working directory, so writes land on your real files. Enable rollback snapshots when you want a safety net:
 
@@ -108,7 +108,7 @@ Inside that wrapped process, `Session(sandbox="nono")` detects the sandbox and p
 
 ## Base Directory Enforcement
 
-All filesystem operations are anchored to `--base-dir`, which defaults to the current directory. Path checks resolve both the base directory and target path through symlinks, then verify that the resolved target remains inside an allowed root. If a path escapes through traversal or symlink indirection, the operation fails.
+All filesystem operations are anchored to `--base-dir`, which defaults to the auto-detected project root (the nearest ancestor directory containing `.git` or `swival.toml`, falling back to the directory you launched from). Path checks resolve both the base directory and target path through symlinks, then verify that the resolved target remains inside an allowed root. If a path escapes through traversal or symlink indirection, the operation fails.
 
 Even with `--files all`, Swival blocks the filesystem root itself. You cannot grant the agent access to `/` by accident.
 

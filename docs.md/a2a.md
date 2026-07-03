@@ -1,6 +1,6 @@
 # A2A
 
-Swival supports the [Agent-to-Agent (A2A) protocol](https://google.github.io/A2A/) v1.0 — both as a client that talks to remote agents, and as a server that exposes a Session for other agents to call.
+Swival supports the [Agent-to-Agent (A2A) protocol](https://google.github.io/A2A/) v1.0, both as a client that talks to remote agents, and as a server that exposes a Session for other agents to call.
 
 ## Using Swival As An A2A Client
 
@@ -160,11 +160,11 @@ Sessions are cleaned up after a configurable TTL (default: 1 hour). If the sessi
 
 The server supports five JSON-RPC methods:
 
-- **SendMessage** — sends a message to a session and returns the task result (blocking)
-- **SendStreamingMessage** — sends a message and returns results as a Server-Sent Events (SSE) stream with real-time status updates, tool lifecycle events, and incremental text delivery
-- **GetTask** — retrieves the current state of a task by ID
-- **ListTasks** — lists tasks, optionally filtered by `contextId`
-- **CancelTask** — signals a running task to stop; the agent loop checks the cancellation flag between tool calls and at the start of each turn
+- **SendMessage**: sends a message to a session and returns the task result (blocking)
+- **SendStreamingMessage**: sends a message and returns results as a Server-Sent Events (SSE) stream with real-time status updates, tool lifecycle events, and incremental text delivery
+- **GetTask**: retrieves the current state of a task by ID
+- **ListTasks**: lists tasks, optionally filtered by `contextId`
+- **CancelTask**: signals a running task to stop; the agent loop checks the cancellation flag between tool calls and at the start of each turn
 
 Task outcomes map from Session results: a successful `ask()` produces a `completed` task, an exhausted run with no answer produces `input-required` (needs more information), an exhausted run with a partial answer or an exception produces `failed`, and a cancelled task produces `canceled`.
 
@@ -172,8 +172,8 @@ Task outcomes map from Session results: a successful `ask()` produces a `complet
 
 When a client sends `SendStreamingMessage`, the server returns an SSE stream instead of a single JSON-RPC response. The stream emits:
 
-- **TaskStatusUpdateEvent** — state transitions (`working`, `completed`, `failed`, `canceled`), heartbeats (every 15 seconds during idle periods), and tool lifecycle metadata (`tool_start`, `tool_finish`, `tool_error`)
-- **TaskArtifactUpdateEvent** — incremental text chunks as the agent produces output, plus the final answer artifact
+- **TaskStatusUpdateEvent**: state transitions (`working`, `completed`, `input-required`, `failed`, `canceled`), heartbeats (every 15 seconds during idle periods), and tool lifecycle metadata (`tool_start`, `tool_finish`, `tool_error`)
+- **TaskArtifactUpdateEvent**: incremental text chunks as the agent produces output, plus the final answer artifact
 
 Heartbeat events include an `idle` field showing how long since the last real event, so clients can distinguish silence from a dead connection. If the client disconnects while the agent is still running, the server signals cancellation and waits for the agent thread to finish before releasing resources.
 
@@ -248,7 +248,7 @@ The `A2aServer.app` property returns a Starlette ASGI application, which can be 
 
 ## Example: Local Documentation Agent
 
-This walkthrough sets up two swival instances — one serving project documentation over A2A, and another querying it. The server agent has access to source code and docs via its base directory, so it can read files and answer questions grounded in the actual codebase.
+This walkthrough sets up two swival instances: one serving project documentation over A2A, and another querying it. The server agent has access to source code and docs via its base directory, so it can read files and answer questions grounded in the actual codebase.
 
 ### The project
 
@@ -313,7 +313,7 @@ url = "http://127.0.0.1:9100"
 swival --a2a-config a2a.toml "Ask the Acme Docs agent: how do I create a new widget? Include a curl example."
 ```
 
-The client agent sees `a2a__acme-docs__lookup` as a tool, calls it with the question, and the server agent reads the project files to build an answer. The response comes back with endpoint details, required fields, and a working curl command — all grounded in the actual README and source code, not hallucinated.
+The client agent sees `a2a__acme-docs__lookup` as a tool, calls it with the question, and the server agent reads the project files to build an answer. The response comes back with endpoint details, required fields, and a working curl command, all grounded in the actual README and source code, not hallucinated.
 
 ### What happens under the hood
 

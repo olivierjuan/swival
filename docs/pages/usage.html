@@ -211,7 +211,7 @@ swival --oneshot-commands '/loop 30 sec check git status and report unusual acti
 <p><code>--reasoning-effort LEVEL</code> sets the reasoning effort for models that support tunable reasoning (e.g. gpt-5.5). Valid levels are <code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, and <code>default</code>.</p>
 <pre><code class="language-sh">swival --provider chatgpt --model gpt-5.5 --reasoning-effort high &quot;task&quot;
 </code></pre>
-<p><code>--show-thinking</code> keeps the model's streamed thinking in your terminal scrollback after the answer is printed, instead of wiping it when the live stream ends. It only affects the display — the thinking goes to stderr, never into stdout, history, traces, or reports — and it needs a verbose, interactive terminal with a provider that streams reasoning. Without it, a collapsed one-line note (<code>thinking: N lines, hidden</code>) is shown instead. The config-file equivalent is <code>show_thinking = true</code>.</p>
+<p><code>--show-thinking</code> keeps the model's streamed thinking in your terminal scrollback after the answer is printed, instead of wiping it when the live stream ends. It only affects the display (the thinking goes to stderr, never into stdout, history, traces, or reports) and it needs a verbose, interactive terminal with a provider that streams reasoning. Without it, a collapsed one-line note (<code>thinking: N lines / ~M tokens, hidden</code>) is shown instead. The config-file equivalent is <code>show_thinking = true</code>.</p>
 <h3 id="service-tiers">Service Tiers</h3>
 <p><strong>Priority processing</strong> gives significantly lower and more consistent latency compared to standard processing, while keeping the same model quality and reasoning effort. It costs more (about 2× standard per-token pricing). Use it for interactive, latency-sensitive workflows where you want faster responses without sacrificing output quality.</p>
 <p><strong>Flex processing</strong> is the opposite — cheaper but with variable latency, as requests may be deferred when capacity is low. Use it for batch jobs, evals, or other asynchronous workloads.</p>
@@ -279,6 +279,9 @@ swival --provider chatgpt --model gpt-5.5 \
 <p><code>--serve-name NAME</code> sets a custom agent name in the A2A agent card. Defaults to <code>swival (provider/model)</code>.</p>
 <p><code>--serve-description TEXT</code> sets a custom agent description in the A2A agent card.</p>
 <p>See <a href="a2a.html">A2A</a> for full server documentation.</p>
+<h3 id="acp-flags">ACP Flags</h3>
+<p><code>--acp</code> speaks the Agent Client Protocol on stdio, for editor integration (Zed, agent-client-protocol.nvim, and others). Incompatible with <code>--serve</code>, <code>--repl</code>, and a positional task. See <a href="acp.html">ACP</a>.</p>
+<p><code>--acp-log PATH</code> logs the JSON-RPC traffic and diagnostics to <code>PATH</code>. Only used with <code>--acp</code>.</p>
 <h3 id="output-and-reporting-flags">Output And Reporting Flags</h3>
 <p><code>--quiet</code> and <code>-q</code> suppress diagnostics and keep terminal output focused on final answers.</p>
 <p><code>--report FILE</code> writes a JSON run report to <code>FILE</code>. In one-shot mode, requires a task. In REPL mode, the report covers the entire session and is written when the session ends.</p>
@@ -301,7 +304,7 @@ swival --provider chatgpt --model gpt-5.5 \
 <p><code>--init-config</code> generates a global config file at <code>~/.config/swival/config.toml</code> and exits. The file is a commented starter template covering the main settings and integrations.</p>
 <p><code>--init-config --project</code> generates a project-local config file at <code>swival.toml</code> in the current base directory instead.</p>
 <p><code>--logout</code> deletes locally cached ChatGPT OAuth credentials and exits. The next <code>--provider chatgpt</code> run starts the device-code login flow again.</p>
-<p>These setup flags do not require a question argument. Config generation refuses to overwrite an existing config file.</p>
+<p>These setup flags do not require a question argument. Config generation never overwrites an existing config file: if one exists, the template is written to a <code>.new</code> file next to it, with your current settings preserved, so you can review it before moving it into place.</p>
 <h3 id="outbound-filter-flag">Outbound Filter Flag</h3>
 <p><code>--llm-filter COMMAND</code> runs a user-defined script before each outbound LLM request. The script receives the message list as JSON on stdin and can modify messages, redact content, or block the request. Fails closed: if the script errors or rejects, nothing is sent to the provider. See <a href="llm-filter.html">Outbound LLM Filter</a> for the full script contract and examples.</p>
 <h3 id="encryption-and-sanitization-flags">Encryption And Sanitization Flags</h3>

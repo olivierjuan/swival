@@ -137,8 +137,8 @@ with Session(
 <li>Config file loading and CLI flag merging</li>
 <li>Provider and model resolution</li>
 <li>Git metadata discovery</li>
-<li><code>.swival/</code> directory creation</li>
 </ul>
+<p>The <code>.swival/</code> directory is not guaranteed to exist yet; a hook that writes into it should <code>mkdir -p</code> first (the example script below does).</p>
 <p>It runs before:</p>
 <ul>
 <li>Memory loading into the system prompt</li>
@@ -158,7 +158,8 @@ with Session(
 <h3 id="repl">REPL</h3>
 <p>Hooks run once on process start and once on process exit. They do not run per prompt, on <code>/clear</code>, or on <code>/continue</code>.</p>
 <h3 id="reviewer-and-serve-modes">Reviewer and Serve Modes</h3>
-<p>Hooks are not run in <code>--reviewer-mode</code> or <code>--serve</code>. Reviewer mode is a subprocess of the main Swival invocation — running hooks there would cause nested syncs. Serve mode manages per-request sessions with different lifecycle semantics that will be addressed separately.</p>
+<p>Hooks are not run in <code>--reviewer-mode</code>. Reviewer mode is a subprocess of the main Swival invocation; running hooks there would cause nested syncs.</p>
+<p>In <code>--serve</code>, the server process itself runs no hooks, but each per-context session it creates inherits the lifecycle settings: the startup hook runs when a context's session is first used, and the exit hook runs when that session is evicted or closed. Pass <code>--no-lifecycle</code> if you do not want per-session hooks in a long-lived server.</p>
 <h2 id="environment-variables">Environment Variables</h2>
 <p>The hook receives all of the parent environment plus these <code>SWIVAL_*</code> variables:</p>
 <table>
@@ -393,7 +394,7 @@ echo &quot;$HF_NS/swival-$HASH&quot;
 <p>The example script above does not do this. It always syncs to <code>heads/&lt;sha&gt;</code>, which means dirty-tree sessions overwrite the same prefix as clean-tree sessions for that commit. For most workflows this is fine. Add the dirty prefix if you need strict isolation.</p>
 <h2 id="interaction-with-other-features">Interaction with Other Features</h2>
 <p><strong>Reviewer and self-review:</strong> Hooks do not run in <code>--reviewer-mode</code>. Self-review spawns a reviewer subprocess, but that subprocess gets <code>--reviewer-mode</code>, so it also skips hooks. No nested sync.</p>
-<p><strong>A2A serve:</strong> Hooks are excluded from <code>--serve</code> in this release. Per-session hooks for long-lived A2A servers need different lifecycle semantics and will be addressed separately.</p>
+<p><strong>A2A serve:</strong> The <code>--serve</code> process itself does not run hooks, but the per-context sessions it creates inherit the lifecycle settings and run startup and exit hooks per session (exit fires when a session is evicted or closed). Use <code>--no-lifecycle</code> to disable hooks in a long-lived server.</p>
 <p><strong>AgentFS sandbox:</strong> Hooks run in the same process context as Swival. If you are running inside an AgentFS sandbox, the hook script needs network access to reach the remote storage backend.</p>
 <p><strong>Reports:</strong> Lifecycle events (startup and exit) are recorded in the report timeline when <code>--report</code> is set. Each event includes its exit code, duration, and any error message. A fail-closed exit hook failure rewrites the report with <code>outcome: "error"</code>.</p>
             <nav class="page-nav" aria-label="Page navigation"><a class="nav-prev" href="acp.html"><span class="nav-label">&larr; Previous</span><span class="nav-title">ACP</span></a><a class="nav-next" href="custom-commands.html"><span class="nav-label">Next &rarr;</span><span class="nav-title">Custom Commands</span></a></nav>

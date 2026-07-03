@@ -22,7 +22,7 @@ To capture the wire traffic and any internal diagnostics for debugging, add `--a
 swival --acp --acp-log /tmp/swival-acp.log
 ```
 
-The log file is the only place swival writes anything other than JSON-RPC frames.
+The log captures both directions of the wire traffic plus diagnostics; stdout never carries anything but JSON-RPC frames, and stray warnings go to stderr.
 
 ## Editor setup
 
@@ -67,7 +67,7 @@ The exact field names depend on your plugin version; consult its README. The sha
 
 ## What is currently supported
 
-- `initialize`, with version negotiation and capability echo
+- `initialize`, with version negotiation and capability advertisement
 - `authenticate` (no-op; provider credentials live in your swival config, not in ACP)
 - `session/new` with a working directory, followed by an `available_commands_update` notification advertising the supported slash commands
 - `session/prompt` for a single text turn, returning when the model finishes or hits the turn limit. A prompt whose text begins with a slash (`/`) or bang (`!`) runs that command, exactly as the REPL would
@@ -86,7 +86,7 @@ echo "$?"
 cat /tmp/swival-acp.log
 ```
 
-A clean exit with no log entries means swival never received a request. A log with a parse error means the editor is sending something other than newline-delimited JSON-RPC. A log with a Python traceback is a swival bug; please file an issue with the log attached.
+A clean exit with no `recv` entries in the log means swival never received a request. A log with a parse error means the editor is sending something other than newline-delimited JSON-RPC. A log with a Python traceback is a swival bug; please file an issue with the log attached.
 
 If you want to drive swival by hand to confirm the protocol works, three lines of JSON are enough:
 

@@ -44,6 +44,10 @@ Pick the provider that matches how you want to run models:
 
 Run `swival --help` for the grouped CLI reference and copy-paste examples.
 
+First time? Run `swival` with no arguments on a terminal: if you have no
+config yet, a short setup wizard walks you through picking a provider and
+writes a starter config to `~/.config/swival/config.toml`.
+
 ### LM Studio
 
 1. Install [LM Studio](https://lmstudio.ai/) and load a model with tool-calling

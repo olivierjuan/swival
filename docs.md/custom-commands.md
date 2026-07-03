@@ -43,7 +43,7 @@ chmod +x ~/.config/swival/commands/context
 
 ### Text templates
 
-A plain text file without the execute bit is treated as a prompt template. Its content is read and inlined directly into the conversation — no subprocess is started. The file must be valid UTF-8 and contain no null bytes (binary files are rejected with "command not executable").
+A plain text file without the execute bit is treated as a prompt template. Its content is read and inlined directly into the conversation; no subprocess is started. The file must be valid UTF-8 and contain no null bytes (binary files are rejected with "command not executable").
 
 ```sh
 cat > ~/.config/swival/commands/review <<'EOF'
@@ -124,7 +124,7 @@ Executable scripts have a 30-second timeout. Text templates have no timeout sinc
 
 ## Community Commands
 
-The [swival-commands](https://github.com/Swival/swival-commands) repository has a growing collection of ready-to-use commands contributed by the community, including a full-repo security audit, a C-specific vulnerability scanner, and a pull request reviewer. Installation is just copying files into your commands directory.
+The [swival-commands](https://github.com/Swival/swival-commands) repository has a growing collection of ready-to-use commands contributed by the community, including a full-repo security audit and a pull request reviewer. Installation is just copying files into your commands directory.
 
 If you have built a command that others might find useful, contributions are welcome there.
 
