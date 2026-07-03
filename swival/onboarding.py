@@ -4,6 +4,7 @@ Guides the user through provider selection and config creation on first run.
 All output goes to stderr via Rich. Never writes to stdout.
 """
 
+import os
 import shlex
 import shutil
 import sys
@@ -150,6 +151,7 @@ _SUCCESS_SECTIONS = [
             ('swival --profile gpt5 "review this patch"', "Named profile"),
             ("swival --list-profiles", "See configured profiles"),
             ("/profile", "List or switch profiles in the REPL"),
+            ("/model", "Browse and switch models in the REPL, tag favorites"),
             ("swival --init-config --project", "Project-local config template"),
         ],
     ),
@@ -466,12 +468,45 @@ def _write_skip_marker() -> None:
         pass
 
 
+def _browse_models(
+    provider: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    *,
+    quiet: bool = False,
+) -> str | None:
+    """Open the interactive model explorer for *provider*.
+
+    Returns the chosen model id, or None when the catalog is unavailable or
+    the user backed out; callers fall through to a typed prompt either way.
+    """
+    from .model_catalog import CatalogUnavailable
+    from .picker import choose_model
+
+    try:
+        choice = choose_model(provider, base_url, api_key)
+    except CatalogUnavailable as e:
+        if not quiet:
+            _console.print(
+                Text(
+                    f"  Couldn't fetch the model list ({e.reason}); type one instead.",
+                    style="yellow",
+                )
+            )
+        return None
+    except (KeyboardInterrupt, EOFError):
+        return None
+    if choice is None:
+        return None
+    return choice[0]
+
+
 def _ask_lmstudio(s: dict) -> None:
     _console.print(
         Text(
             "Great pick! LM Studio is the fastest way to get going locally.\n"
-            "Leave the model blank and Swival will auto-detect whatever you\n"
-            "have loaded.",
+            "Swival can auto-detect whatever you have loaded, or you can pick\n"
+            "one of your downloaded models now.",
             style="dim",
         )
     )
@@ -485,7 +520,19 @@ def _ask_lmstudio(s: dict) -> None:
         if url and url != "http://127.0.0.1:1234":
             s["base_url"] = url
 
-    model = _prompt_text("Model name (blank for auto-discovery)", default="")
+    idx = _prompt_choice(
+        "Model",
+        [
+            "Auto-detect the loaded model at startup (recommended)",
+            "Pick from the models downloaded in LM Studio",
+            "Type a model name",
+        ],
+    )
+    model = ""
+    if idx == 1:
+        model = _browse_models("lmstudio", s.get("base_url")) or ""
+    if idx == 2 or (idx == 1 and not model):
+        model = _prompt_text("Model name (blank for auto-discovery)", default="")
     if model:
         s["model"] = model
 
@@ -535,7 +582,8 @@ def _ask_mlx(s: dict) -> None:
         if url:
             s["base_url"] = url
 
-    s["model"] = _prompt_text_required("Model name")
+    model = _browse_models("generic", s["base_url"], quiet=True)
+    s["model"] = model or _prompt_text_required("Model name")
 
 
 def _ask_chatgpt(s: dict) -> None:
@@ -560,7 +608,17 @@ def _ask_chatgpt(s: dict) -> None:
 
 
 def _ask_openrouter(s: dict) -> None:
-    s["model"] = _prompt_text_required("Model (e.g. openai/gpt-5.5)")
+    idx = _prompt_choice(
+        "Model",
+        [
+            "Browse the OpenRouter catalog",
+            "Type a model id (e.g. openai/gpt-5.5)",
+        ],
+    )
+    model = None
+    if idx == 0:
+        model = _browse_models("openrouter", None, os.environ.get("OPENROUTER_API_KEY"))
+    s["model"] = model or _prompt_text_required("Model (e.g. openai/gpt-5.5)")
 
     _ask_api_key(s, env_var="OPENROUTER_API_KEY")
 
@@ -570,14 +628,28 @@ def _ask_openrouter(s: dict) -> None:
 
 
 def _ask_google(s: dict) -> None:
-    s["model"] = _prompt_text_required("Model (e.g. gemini-3-flash)")
+    # Listing Gemini models needs a key, so the explorer is only offered when
+    # one is already in the environment.
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    model = None
+    if key:
+        idx = _prompt_choice(
+            "Model",
+            ["Browse available Gemini models", "Type a model name"],
+        )
+        if idx == 0:
+            model = _browse_models("google", None, key)
+    s["model"] = model or _prompt_text_required("Model (e.g. gemini-3-flash)")
 
     _ask_api_key(s, env_var="GEMINI_API_KEY or OPENAI_API_KEY")
 
 
 def _ask_generic(s: dict) -> None:
     s["base_url"] = _prompt_text_required("Base URL (e.g. http://127.0.0.1:11434)")
-    s["model"] = _prompt_text_required("Model name")
+    model = _browse_models(
+        "generic", s["base_url"], os.environ.get("OPENAI_API_KEY"), quiet=True
+    )
+    s["model"] = model or _prompt_text_required("Model name")
 
     _ask_api_key(s, env_var="OPENAI_API_KEY")
 
@@ -587,11 +659,24 @@ def _ask_generic(s: dict) -> None:
 
 
 def _ask_huggingface(s: dict) -> None:
-    while True:
+    idx = _prompt_choice(
+        "Model",
+        [
+            "Browse models served by inference providers (recommended)",
+            "Type a model id (org/model)",
+        ],
+    )
+    model = ""
+    if idx == 0:
+        model = _browse_models("huggingface", None, os.environ.get("HF_TOKEN")) or ""
+        if model and "/" not in model:
+            _console.print(Text("  Must be in org/model format.", style="red"))
+            model = ""
+    while not model:
         model = _prompt_text_required("Model (org/model, e.g. zai-org/GLM-5.2)")
-        if "/" in model:
-            break
-        _console.print(Text("  Must be in org/model format.", style="red"))
+        if "/" not in model:
+            _console.print(Text("  Must be in org/model format.", style="red"))
+            model = ""
     s["model"] = model
 
     _ask_api_key(s, env_var="HF_TOKEN", label="HuggingFace token")

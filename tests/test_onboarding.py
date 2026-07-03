@@ -273,7 +273,7 @@ class TestRunOnboarding:
                 "2",  # Quick setup
                 "1",  # LM Studio provider
                 "y",  # Use default server
-                "",  # Model blank (auto-discovery)
+                "1",  # Auto-detect model at startup
                 "1",  # Yes, write config
             ],
         )
@@ -297,7 +297,7 @@ class TestRunOnboarding:
                 "",  # Press Enter to continue past intro screen
                 "1",  # LM Studio provider
                 "y",  # Use default server
-                "",  # Model blank
+                "1",  # Auto-detect model at startup
                 "1",  # Yes, write config
             ],
         )
@@ -321,7 +321,7 @@ class TestRunOnboarding:
                 "",  # Continue past intro
                 "1",  # LM Studio
                 "y",  # Default server
-                "",  # No model
+                "1",  # Auto-detect model
                 "1",  # Write config
             ],
         )
@@ -343,7 +343,7 @@ class TestRunOnboarding:
                 "2",  # Quick setup
                 "1",  # LM Studio
                 "y",  # Default
-                "",  # No model
+                "1",  # Auto-detect model
                 "1",  # Write config
             ],
         )
@@ -384,6 +384,7 @@ class TestRunOnboarding:
             [
                 "2",  # Quick setup
                 "5",  # OpenRouter
+                "2",  # Type a model id
                 "openai/gpt-5.5",  # model
                 "1",  # I'll set OPENROUTER_API_KEY myself
                 "",  # skip context window
@@ -420,6 +421,7 @@ class TestRunOnboarding:
     def test_successful_generic_with_api_key(self, tmp_path, monkeypatch):
         cfg_dir = tmp_path / "cfg"
         monkeypatch.setattr("swival.onboarding.global_config_dir", lambda: cfg_dir)
+        monkeypatch.setattr("swival.onboarding._browse_models", lambda *a, **k: None)
         _patch_prompt_sequence(
             monkeypatch,
             [
@@ -450,7 +452,7 @@ class TestRunOnboarding:
                 "2",  # Quick setup
                 "1",  # LM Studio
                 "y",  # Default server
-                "",  # No model
+                "1",  # Auto-detect model
                 "3",  # Cancel at confirmation
             ],
         )
@@ -468,7 +470,7 @@ class TestRunOnboarding:
                 "2",  # Quick setup
                 "1",  # LM Studio (first attempt)
                 "y",  # Default server
-                "",  # No model
+                "1",  # Auto-detect model
                 "2",  # Start over
                 "4",  # ChatGPT (second attempt)
                 "gpt-4.1",  # model
@@ -512,7 +514,7 @@ class TestRunOnboarding:
                 "2",  # Quick setup
                 "1",  # LM Studio
                 "y",
-                "",
+                "1",  # Auto-detect model
                 "1",  # Write config
             ],
         )
@@ -530,7 +532,7 @@ class TestRunOnboarding:
                 "2",  # Quick setup
                 "1",  # LM Studio
                 "y",
-                "",
+                "1",  # Auto-detect model
                 "1",  # Write config
             ],
         )
@@ -549,7 +551,7 @@ class TestRunOnboarding:
                 "",  # Continue
                 "1",  # LM Studio
                 "y",
-                "",
+                "1",  # Auto-detect model
                 "1",
             ],
         )
@@ -599,6 +601,7 @@ class TestRequiredFieldValidation:
         _patch_prompt_sequence(
             monkeypatch,
             [
+                "2",  # type a model id
                 "bare-model",  # no slash
                 "org/model",  # valid
                 "1",  # "I'll set HF_TOKEN myself"
@@ -644,7 +647,7 @@ class TestRequiredFieldValidation:
             monkeypatch,
             [
                 "y",  # use default server
-                "",  # blank model
+                "1",  # auto-detect at startup
             ],
         )
         s = {}
@@ -670,6 +673,7 @@ class TestRequiredFieldValidation:
         _patch_prompt_sequence(
             monkeypatch,
             [
+                "2",  # type a model id
                 "",  # blank model
                 "openai/gpt-5.4",  # valid model
                 "1",  # "I'll set OPENROUTER_API_KEY myself"
@@ -683,6 +687,8 @@ class TestRequiredFieldValidation:
 
     def test_ask_google_requires_model(self, monkeypatch):
         buf = _capture_stderr(monkeypatch)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         _patch_prompt_sequence(
             monkeypatch,
             [
@@ -698,6 +704,7 @@ class TestRequiredFieldValidation:
 
     def test_ask_generic_requires_base_url_and_model(self, monkeypatch):
         buf = _capture_stderr(monkeypatch)
+        monkeypatch.setattr("swival.onboarding._browse_models", lambda *a, **k: None)
         _patch_prompt_sequence(
             monkeypatch,
             [
@@ -733,6 +740,8 @@ class TestRequiredFieldValidation:
 
     def test_google_onboarding_mentions_both_env_vars(self, monkeypatch):
         buf = _capture_stderr(monkeypatch)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         _patch_prompt_sequence(
             monkeypatch,
             [
@@ -745,3 +754,218 @@ class TestRequiredFieldValidation:
         output = buf.getvalue()
         assert "GEMINI_API_KEY" in output
         assert "OPENAI_API_KEY" in output
+
+
+class TestModelExplorerIntegration:
+    def test_browse_models_returns_choice(self, monkeypatch):
+        from swival.model_catalog import ModelEntry
+        from swival.onboarding import _browse_models
+
+        entry = ModelEntry(id="org/picked")
+        monkeypatch.setattr(
+            "swival.picker.choose_model", lambda *a, **k: ("org/picked", entry)
+        )
+        assert _browse_models("huggingface") == "org/picked"
+
+    def test_browse_models_none_on_cancel(self, monkeypatch):
+        from swival.onboarding import _browse_models
+
+        monkeypatch.setattr("swival.picker.choose_model", lambda *a, **k: None)
+        assert _browse_models("huggingface") is None
+
+    def test_browse_models_unavailable_prints_note(self, monkeypatch):
+        from swival.model_catalog import CatalogUnavailable
+        from swival.onboarding import _browse_models
+
+        buf = _capture_stderr(monkeypatch)
+
+        def boom(*a, **k):
+            raise CatalogUnavailable("network down")
+
+        monkeypatch.setattr("swival.picker.choose_model", boom)
+        assert _browse_models("huggingface") is None
+        assert "network down" in buf.getvalue()
+
+    def test_browse_models_quiet_suppresses_note(self, monkeypatch):
+        from swival.model_catalog import CatalogUnavailable
+        from swival.onboarding import _browse_models
+
+        buf = _capture_stderr(monkeypatch)
+
+        def boom(*a, **k):
+            raise CatalogUnavailable("network down")
+
+        monkeypatch.setattr("swival.picker.choose_model", boom)
+        assert _browse_models("generic", "http://x", quiet=True) is None
+        assert "network down" not in buf.getvalue()
+
+    def test_ask_lmstudio_pick_from_downloaded(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr(
+            "swival.onboarding._browse_models", lambda *a, **k: "qwen3-coder-30b"
+        )
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "y",  # use default server
+                "2",  # pick from downloaded models
+            ],
+        )
+        s = {}
+        _ask_lmstudio(s)
+        assert s["model"] == "qwen3-coder-30b"
+
+    def test_ask_lmstudio_pick_falls_back_to_typing(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr("swival.onboarding._browse_models", lambda *a, **k: None)
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "y",  # use default server
+                "2",  # pick from downloaded models (unavailable)
+                "typed-model",  # falls back to the text prompt
+            ],
+        )
+        s = {}
+        _ask_lmstudio(s)
+        assert s["model"] == "typed-model"
+
+    def test_ask_huggingface_browse(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr(
+            "swival.onboarding._browse_models", lambda *a, **k: "zai-org/GLM-5.2"
+        )
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "1",  # browse the explorer
+                "1",  # I'll set HF_TOKEN myself
+                "",  # skip endpoint
+            ],
+        )
+        s = {}
+        _ask_huggingface(s)
+        assert s["model"] == "zai-org/GLM-5.2"
+
+    def test_ask_huggingface_browse_cancel_falls_back(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr("swival.onboarding._browse_models", lambda *a, **k: None)
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "1",  # browse the explorer (cancelled)
+                "org/typed",  # falls back to typing
+                "1",  # I'll set HF_TOKEN myself
+                "",  # skip endpoint
+            ],
+        )
+        s = {}
+        _ask_huggingface(s)
+        assert s["model"] == "org/typed"
+
+    def test_ask_openrouter_browse(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr(
+            "swival.onboarding._browse_models", lambda *a, **k: "openai/gpt-5.5"
+        )
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "1",  # browse the catalog
+                "1",  # I'll set OPENROUTER_API_KEY myself
+                "",  # skip context tokens
+            ],
+        )
+        s = {}
+        _ask_openrouter(s)
+        assert s["model"] == "openai/gpt-5.5"
+
+    def test_ask_google_offers_browse_with_env_key(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+        seen = {}
+
+        def fake_browse(provider, base_url=None, api_key=None, **kw):
+            seen["key"] = api_key
+            return "gemini-3-flash"
+
+        monkeypatch.setattr("swival.onboarding._browse_models", fake_browse)
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "1",  # browse Gemini models
+                "1",  # I'll set the env var myself
+            ],
+        )
+        s = {}
+        _ask_google(s)
+        assert s["model"] == "gemini-3-flash"
+        assert seen["key"] == "g-key"
+
+    def test_ask_generic_uses_browse_when_server_lists(self, monkeypatch):
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr(
+            "swival.onboarding._browse_models", lambda *a, **k: "served-model"
+        )
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "http://localhost:11434",  # base URL
+                "1",  # I'll set OPENAI_API_KEY myself
+                "",  # skip context tokens
+            ],
+        )
+        s = {}
+        _ask_generic(s)
+        assert s["model"] == "served-model"
+
+    def test_success_screen_mentions_model_command(self, tmp_path, monkeypatch):
+        cfg_dir = tmp_path / "cfg"
+        monkeypatch.setattr("swival.onboarding.global_config_dir", lambda: cfg_dir)
+        buf = _capture_stderr(monkeypatch)
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "2",  # Quick setup
+                "1",  # LM Studio
+                "y",  # Default server
+                "1",  # Auto-detect model
+                "1",  # Write config
+            ],
+        )
+        run_onboarding()
+        assert "/model" in buf.getvalue()
+
+    def test_ask_mlx_uses_browse_when_server_lists(self, monkeypatch):
+        from swival.onboarding import _ask_mlx
+
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr(
+            "swival.onboarding._browse_models", lambda *a, **k: "mlx-model"
+        )
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "y",  # use default server
+            ],
+        )
+        s = {}
+        _ask_mlx(s)
+        assert s["provider"] == "generic"
+        assert s["model"] == "mlx-model"
+
+    def test_ask_mlx_falls_back_to_typing(self, monkeypatch):
+        from swival.onboarding import _ask_mlx
+
+        _capture_stderr(monkeypatch)
+        monkeypatch.setattr("swival.onboarding._browse_models", lambda *a, **k: None)
+        _patch_prompt_sequence(
+            monkeypatch,
+            [
+                "y",  # use default server
+                "typed-mlx-model",  # required model prompt
+            ],
+        )
+        s = {}
+        _ask_mlx(s)
+        assert s["model"] == "typed-mlx-model"

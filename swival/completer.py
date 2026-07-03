@@ -48,6 +48,9 @@ class SwivalCompleter(Completer):
         self._skills_catalog = skills_catalog
         self._path_completer = PathCompleter(only_directories=True, expanduser=True)
         self._file_completer = PathCompleter(only_directories=False, expanduser=True)
+        # Optional callable returning model-id candidates for /model. Must be
+        # cheap and network-free; set by the REPL once session state exists.
+        self.model_candidates = None
 
     def get_completions(self, document: Document, complete_event):
         text = document.text_before_cursor
@@ -59,10 +62,13 @@ class SwivalCompleter(Completer):
         if text.startswith("/"):
             parts = text.split(None, 1)
             cmd = parts[0].lower()
-            if cmd in INPUT_COMMANDS and INPUT_COMMANDS[cmd].arg_type == "dir_path":
-                arg_text = parts[1] if len(parts) > 1 else ""
+            arg_type = INPUT_COMMANDS[cmd].arg_type if cmd in INPUT_COMMANDS else None
+            arg_text = parts[1] if len(parts) > 1 else ""
+            if arg_type == "dir_path":
                 sub_doc = Document(arg_text, len(arg_text))
                 yield from self._path_completer.get_completions(sub_doc, complete_event)
+            elif arg_type == "model" and self.model_candidates is not None:
+                yield from self._complete_models(arg_text)
             return
 
         if text.startswith("!") and " " not in text:
@@ -90,6 +96,16 @@ class SwivalCompleter(Completer):
                     start_position=-len(text),
                     display_meta=INPUT_COMMANDS[cmd].desc,
                 )
+
+    def _complete_models(self, arg_text: str):
+        try:
+            candidates = self.model_candidates() or []
+        except Exception:
+            return
+        prefix = arg_text.lower()
+        for name in candidates:
+            if name.lower().startswith(prefix):
+                yield Completion(name, start_position=-len(arg_text))
 
     def _complete_custom_commands(self, text: str):
         from .agent import discover_custom_commands

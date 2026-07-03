@@ -136,6 +136,13 @@ INPUT_COMMANDS: dict[str, CommandInfo] = {
         modes=("repl",),
         acp=False,
     ),
+    "/model": CommandInfo(
+        desc="Switch model within the current provider (no arg = pick, - = revert)",
+        arg="[name|-]",
+        arg_type="model",
+        kind="state_change",
+        options=(("--fav [ID]", "Toggle favorite for the current or given model"),),
+    ),
     "/new": CommandInfo(
         desc="Reset conversation to initial state",
         kind="state_change",

@@ -46,6 +46,9 @@ class InputContext:
     startup_profile: str | None = None
     raw_llm_baseline: dict = field(default_factory=dict)
     pre_profile_baseline: dict = field(default_factory=dict)
+    # (provider, model_id) the session ran before the last /model switch
+    # (for /model -). Self-validating: ignored when the provider changes.
+    last_model: "tuple[str, str] | None" = None
     # External managers.
     mcp_manager: object = None
     a2a_manager: object = None

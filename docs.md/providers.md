@@ -72,7 +72,7 @@ When a reload is required, it can take noticeable time depending on model size a
 
 ## HuggingFace Inference API
 
-For HuggingFace, `--model` is required and must be in `org/model` format. Authentication comes from `HF_TOKEN` by default or `--api-key` if you pass one explicitly.
+For HuggingFace, `--model` is required and must be in `org/model` format. Authentication comes from `HF_TOKEN` by default or `--api-key` if you pass one explicitly. If you don't know which model to pick, the `/model` command in the REPL (and the first-run wizard) opens an explorer over the models currently served by inference providers, with per-provider context and pricing details plus each model's aggregate tool-support status; see [Usage](usage.md).
 
 ```sh
 export HF_TOKEN=hf_your_token_here

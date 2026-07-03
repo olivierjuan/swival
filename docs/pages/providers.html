@@ -147,7 +147,7 @@ swival --profile gpt5 &quot;hard task&quot;
 <p>If the requested value already matches the loaded context length, no reload happens.</p>
 <p>When a reload is required, it can take noticeable time depending on model size and hardware.</p>
 <h2 id="huggingface-inference-api">HuggingFace Inference API</h2>
-<p>For HuggingFace, <code>--model</code> is required and must be in <code>org/model</code> format. Authentication comes from <code>HF_TOKEN</code> by default or <code>--api-key</code> if you pass one explicitly.</p>
+<p>For HuggingFace, <code>--model</code> is required and must be in <code>org/model</code> format. Authentication comes from <code>HF_TOKEN</code> by default or <code>--api-key</code> if you pass one explicitly. If you don't know which model to pick, the <code>/model</code> command in the REPL (and the first-run wizard) opens an explorer over the models currently served by inference providers, with per-provider context and pricing details plus each model's aggregate tool-support status; see <a href="usage.html">Usage</a>.</p>
 <pre><code class="language-sh">export HF_TOKEN=hf_your_token_here
 swival --provider huggingface --model zai-org/GLM-5.2 &quot;task&quot;
 </code></pre>

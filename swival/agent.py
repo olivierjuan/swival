@@ -11069,6 +11069,30 @@ def _repl_status(
     return "\n".join(lines)
 
 
+def _overlay_profile(pre_profile_baseline: dict | None, profile_body: dict) -> dict:
+    """Overlay a profile body onto the pre-profile top-level config.
+
+    Matches startup semantics: profiles that omit e.g. api_key inherit it
+    from top-level config, not from the previous profile.
+    """
+    from .config import _PROFILE_METADATA_KEYS
+
+    merged = dict(pre_profile_baseline or {})
+    for k, v in profile_body.items():
+        if k not in _PROFILE_METADATA_KEYS:
+            merged[k] = v
+    return merged
+
+
+def _commit_llm_runtime(repl_kwargs: dict, subagent_manager, updates: dict) -> None:
+    """Commit resolved LLM runtime values into the live loop kwargs and mirror
+    them into the subagent template so newly spawned subagents inherit them."""
+    repl_kwargs.update(updates)
+    if subagent_manager is not None:
+        for k in updates:
+            subagent_manager._template[k] = repl_kwargs[k]
+
+
 def _repl_profile(
     cmd_arg: str,
     profiles: dict,
@@ -11084,8 +11108,6 @@ def _repl_profile(
 
     Returns ``(new_profile_name, message, is_error)``.
     """
-    from .config import _PROFILE_METADATA_KEYS
-
     if repl_kwargs is None:
         repl_kwargs = {}
 
@@ -11120,13 +11142,7 @@ def _repl_profile(
         new_name = name
 
     if profile_body is not None:
-        # Match startup semantics: overlay the profile onto the pre-profile
-        # top-level config, so profiles that omit e.g. api_key inherit it
-        # from top-level config, not from the previous profile.
-        merged = dict(pre_profile_baseline or {})
-        for k, v in profile_body.items():
-            if k not in _PROFILE_METADATA_KEYS:
-                merged[k] = v
+        merged = _overlay_profile(pre_profile_baseline, profile_body)
     else:
         # /profile - : revert to startup-resolved state
         merged = dict(raw_baseline)
@@ -11175,27 +11191,20 @@ def _repl_profile(
         if key not in _PROFILE_LLM_KEYS and key not in llm_kwargs:
             llm_kwargs[key] = val
 
-    repl_kwargs["model_id"] = model_id
-    repl_kwargs["api_base"] = api_base
-    repl_kwargs["context_length"] = context_length
-    repl_kwargs["llm_kwargs"] = llm_kwargs
-    repl_kwargs["max_output_tokens"] = merged.get("max_output_tokens")
-    repl_kwargs["temperature"] = merged.get("temperature")
-    repl_kwargs["top_p"] = merged.get("top_p")
-    repl_kwargs["seed"] = merged.get("seed")
-
-    if subagent_manager is not None:
-        for k in (
-            "model_id",
-            "api_base",
-            "context_length",
-            "llm_kwargs",
-            "max_output_tokens",
-            "temperature",
-            "top_p",
-            "seed",
-        ):
-            subagent_manager._template[k] = repl_kwargs[k]
+    _commit_llm_runtime(
+        repl_kwargs,
+        subagent_manager,
+        {
+            "model_id": model_id,
+            "api_base": api_base,
+            "context_length": context_length,
+            "llm_kwargs": llm_kwargs,
+            "max_output_tokens": merged.get("max_output_tokens"),
+            "temperature": merged.get("temperature"),
+            "top_p": merged.get("top_p"),
+            "seed": merged.get("seed"),
+        },
+    )
 
     label = f"profile: {new_name}" if new_name else "profile: (baseline)"
     lines = [
@@ -11204,6 +11213,404 @@ def _repl_profile(
         f"endpoint: {api_base}",
     ]
     return new_name, "\n".join(lines), False
+
+
+def _current_llm_settings(
+    profiles: dict,
+    current_profile: str | None,
+    startup_profile: str | None,
+    raw_baseline: dict,
+    pre_profile_baseline: dict | None,
+) -> dict:
+    """Return the provider settings the session currently runs under.
+
+    Mirrors _repl_profile: at startup (or after /profile -) the resolved
+    startup args are authoritative; after a /profile switch the profile body
+    overlays the pre-profile top-level config.
+    """
+    if (
+        current_profile
+        and current_profile != startup_profile
+        and current_profile in profiles
+    ):
+        return _overlay_profile(pre_profile_baseline, profiles[current_profile])
+    return dict(raw_baseline or {})
+
+
+def _repl_model(
+    cmd_arg: str,
+    *,
+    profiles: dict,
+    current_profile: str | None,
+    startup_profile: str | None,
+    raw_baseline: dict,
+    pre_profile_baseline: dict | None = None,
+    repl_kwargs: dict | None = None,
+    subagent_manager=None,
+    last_model: tuple[str, str] | None = None,
+    interactive: bool = True,
+    verbose: bool = False,
+) -> tuple[tuple[str, str] | None, str, bool]:
+    """Handle /model.
+
+    Returns ``(last_model, message, is_error)`` where ``last_model`` is the
+    ``(provider, model_id)`` pair the caller should store for a later
+    ``/model -`` revert. The pair is self-validating: one recorded under a
+    different provider is treated as empty.
+    """
+    from . import model_prefs
+    from .model_catalog import CatalogUnavailable, normalize_provider
+
+    if repl_kwargs is None:
+        repl_kwargs = {}
+
+    settings = _current_llm_settings(
+        profiles, current_profile, startup_profile, raw_baseline, pre_profile_baseline
+    )
+    provider = normalize_provider(settings.get("provider") or "lmstudio")
+    settings["provider"] = provider
+    current_model = repl_kwargs.get("model_id")
+    arg = cmd_arg.strip()
+
+    if arg == "--fav" or arg.startswith("--fav "):
+        target = arg[len("--fav") :].strip() or current_model
+        if not target:
+            return last_model, "no model to favorite (usage: /model --fav [id])", True
+        try:
+            now_favorite = model_prefs.toggle_favorite(provider, target)
+        except OSError as exc:
+            return last_model, f"could not save favorites: {exc}", True
+        verb = "added to" if now_favorite else "removed from"
+        return last_model, f"{target} {verb} {provider} favorites", False
+
+    if arg.startswith("--"):
+        option = arg.split(None, 1)[0]
+        return last_model, f"unknown option {option!r} (supported: --fav)", True
+
+    api_key = repl_kwargs.get("llm_kwargs", {}).get("api_key") or settings.get(
+        "api_key"
+    )
+
+    if arg == "-":
+        last_pair = last_model if last_model and last_model[0] == provider else None
+        if not last_pair:
+            return last_model, "no previous model to revert to", True
+        new_model, entry = last_pair[1], None
+    elif not arg:
+        if not interactive:
+            text, err = _format_model_listing(
+                provider, settings.get("base_url"), api_key, current_model
+            )
+            return last_model, text, err
+        from .picker import choose_model
+
+        try:
+            choice = choose_model(
+                provider,
+                settings.get("base_url"),
+                api_key,
+                current=current_model,
+            )
+        except CatalogUnavailable as e:
+            msg = f"cannot list models: {e.reason}"
+            if e.hint:
+                msg += f"\n{e.hint}"
+            return last_model, msg, True
+        if choice is None:
+            return last_model, "model switch cancelled", False
+        new_model, entry = choice
+    else:
+        try:
+            choice = _resolve_model_arg(
+                arg,
+                provider=provider,
+                base_url=settings.get("base_url"),
+                api_key=api_key,
+                interactive=interactive,
+                current_model=current_model,
+            )
+        except _ModelResolveError as exc:
+            return last_model, str(exc), True
+        if choice is None:
+            return last_model, "model switch cancelled", False
+        new_model, entry = choice
+
+    return _model_switch(
+        new_model,
+        entry,
+        settings=settings,
+        repl_kwargs=repl_kwargs,
+        subagent_manager=subagent_manager,
+        last_model=last_model,
+        verbose=verbose,
+    )
+
+
+def _model_switch(
+    new_model: str,
+    entry,
+    *,
+    settings: dict,
+    repl_kwargs: dict,
+    subagent_manager,
+    last_model: tuple[str, str] | None,
+    verbose: bool,
+) -> tuple[tuple[str, str] | None, str, bool]:
+    """Re-resolve the provider with *new_model* and commit only on success."""
+    from . import model_prefs
+
+    previous = repl_kwargs.get("model_id")
+    if new_model == previous:
+        return last_model, f"already using {new_model}", False
+
+    try:
+        model_id, api_base, resolved_key, context_length, _ = resolve_provider(
+            provider=settings["provider"],
+            model=new_model,
+            api_key=settings.get("api_key"),
+            base_url=settings.get("base_url"),
+            max_context_tokens=settings.get("max_context_tokens"),
+            verbose=verbose,
+            aws_profile=settings.get("aws_profile"),
+            project=settings.get("project"),
+            location=settings.get("location"),
+        )
+    except (ConfigError, AgentError) as exc:
+        msg = f"model switch failed: {exc}"
+        if previous:
+            msg += f"\nStill using {previous}."
+        return last_model, msg, True
+
+    if context_length is None and entry is not None:
+        context_length = entry.context_length
+
+    # The provider is unchanged, so the session llm_kwargs (reasoning effort,
+    # extra_body, caching, auth) carry over; only the resolved key can move.
+    llm_kwargs = dict(repl_kwargs.get("llm_kwargs", {}))
+    if resolved_key is not None:
+        llm_kwargs["api_key"] = resolved_key
+
+    _commit_llm_runtime(
+        repl_kwargs,
+        subagent_manager,
+        {
+            "model_id": model_id,
+            "api_base": api_base,
+            "context_length": context_length,
+            "llm_kwargs": llm_kwargs,
+        },
+    )
+
+    try:
+        model_prefs.record_recent(settings["provider"], model_id)
+    except OSError:
+        pass
+
+    lines = [f"model: {model_id}"]
+    if context_length:
+        lines.append(f"context: {context_length:,} tokens")
+    if entry is not None and entry.price_in is not None:
+        price = f"${entry.price_in:g}"
+        if entry.price_out is not None:
+            price += f" in / ${entry.price_out:g} out"
+        lines.append(f"price: {price} per Mtok")
+    if entry is not None and entry.supports_tools is False:
+        lines.append(
+            "note: this model reports no tool-calling support; "
+            "Swival falls back to plain chat if tools are rejected"
+        )
+    new_last = (settings["provider"], previous) if previous else last_model
+    return new_last, "\n".join(lines), False
+
+
+class _ModelResolveError(Exception):
+    """A /model argument could not be resolved; str() is the user message."""
+
+
+def _resolve_model_arg(
+    arg: str,
+    *,
+    provider: str,
+    base_url: str | None,
+    api_key: str | None,
+    interactive: bool,
+    current_model: str | None,
+) -> tuple[str, object | None] | None:
+    """Resolve a direct /model argument against the provider catalog.
+
+    Returns ``(model_id, entry)``, or None when the user cancelled out of
+    the disambiguation picker. Raises :class:`_ModelResolveError` when the
+    argument matches nothing usable.
+    """
+    from . import model_prefs
+    from .model_catalog import (
+        CatalogUnavailable,
+        ModelEntry,
+        is_hf_router,
+        list_models,
+    )
+    from .picker import match_score, rank_entries
+
+    try:
+        catalog = list_models(provider, base_url, api_key)
+    except CatalogUnavailable:
+        # No listing for this provider (or the fetch failed): trust the id
+        # and let resolve_provider / the first call validate it.
+        return arg, None
+
+    by_id = {e.id.lower(): e for e in catalog.entries}
+    exact = by_id.get(arg.lower())
+    if exact is not None:
+        return exact.id, exact
+
+    # Fuzzy pool: favorites and recents (as stub entries when the catalog
+    # does not carry them) outrank catalog entries.
+    preferred = model_prefs.load_prefs().preferred_for(provider)
+    pool = catalog.entries + [
+        ModelEntry(id=name) for name in preferred if name.lower() not in by_id
+    ]
+    ranked = rank_entries(pool, query=arg, favorites=set(preferred))
+
+    if ranked and (len(ranked) == 1 or match_score(arg, ranked[0]) == 0):
+        sel = ranked[0]
+        return sel.id, by_id.get(sel.id.lower())
+
+    if ranked:
+        if interactive:
+            from .picker import choose_model
+
+            try:
+                return choose_model(
+                    provider,
+                    base_url,
+                    api_key,
+                    current=current_model,
+                    initial_query=arg,
+                )
+            except CatalogUnavailable as e:
+                raise _ModelResolveError(f"cannot list models: {e.reason}")
+        listing = "\n".join(f"  • {e.id}" for e in ranked[:10])
+        raise _ModelResolveError(
+            f"{arg!r} matches several models:\n{listing}\nBe more specific."
+        )
+
+    if is_hf_router(provider, base_url) and "/" in arg:
+        checked = _hf_exact_status_check(arg, api_key, catalog)
+        if checked is not None:
+            return checked
+
+    available = [e.id for e in catalog.entries]
+    raise _ModelResolveError(_format_model_not_found(arg, available))
+
+
+def _hf_exact_status_check(arg, api_key, catalog):
+    """Check an exact hub id the router catalog does not carry.
+
+    Returns ``(model_id, entry)`` when a live provider serves it, raises
+    :class:`_ModelResolveError` when the model exists but is unserved, or
+    returns None to fall through to the generic not-found message.
+    """
+    import difflib
+
+    from .model_catalog import CatalogUnavailable, hf_model_status
+
+    try:
+        exists, entry, others = hf_model_status(arg, api_key)
+    except CatalogUnavailable:
+        return None
+    if entry is not None:
+        return arg, entry
+    if not exists:
+        return None
+
+    lines = [f"cannot use {arg} right now."]
+    if others:
+        lines.append("No inference provider is currently serving it:")
+        lines.extend(f"  {o}" for o in others)
+    else:
+        lines.append("No inference provider is serving it.")
+    close = difflib.get_close_matches(
+        arg, [e.id for e in catalog.entries], n=3, cutoff=0.3
+    )
+    if close:
+        lines.append("Close matches that are available:")
+        lines.extend(f"  • {c}" for c in close)
+    raise _ModelResolveError("\n".join(lines))
+
+
+_MODEL_LISTING_LIMIT = 30
+
+
+def _format_model_listing(
+    provider: str,
+    base_url: str | None,
+    api_key: str | None,
+    current_model: str | None,
+) -> tuple[str, bool]:
+    """Plain-text catalog listing for non-interactive /model calls."""
+    from . import model_prefs
+    from .model_catalog import CatalogUnavailable, list_models
+    from .picker import _id_width, format_entry, rank_entries
+
+    try:
+        catalog = list_models(provider, base_url, api_key)
+    except CatalogUnavailable as e:
+        msg = f"cannot list models: {e.reason}"
+        if e.hint:
+            msg += f"\n{e.hint}"
+        return msg, True
+
+    limit = _MODEL_LISTING_LIMIT
+    prefs = model_prefs.load_prefs()
+    favorites = set(prefs.favorites_for(provider))
+    ranked = rank_entries(
+        catalog.entries,
+        favorites=favorites,
+        recents=prefs.recents_for(provider),
+        current=current_model,
+    )
+    width = _id_width(list(ranked[:limit]))
+    lines = [f"models from {catalog.source}:"]
+    for e in ranked[:limit]:
+        lines.append(
+            "  "
+            + format_entry(
+                e,
+                is_favorite=e.id in favorites,
+                is_current=e.id == current_model,
+                id_width=width,
+            )
+        )
+    if len(ranked) > limit:
+        lines.append(f"  … {len(ranked) - limit} more")
+    lines.append("switch with /model <id>")
+    return "\n".join(lines), False
+
+
+def _model_completion_candidates(ctx) -> list[str]:
+    """Model-id completion pool for /model: favorites, recents, cached catalog.
+
+    Runs on every TAB press, so it must never touch the network; the catalog
+    part only appears once a picker or listing has populated the cache.
+    """
+    from .model_catalog import cached_entries, normalize_provider
+    from .model_prefs import load_prefs
+
+    settings = _current_llm_settings(
+        ctx.profiles,
+        ctx.current_profile,
+        ctx.startup_profile,
+        ctx.raw_llm_baseline,
+        ctx.pre_profile_baseline,
+    )
+    provider = normalize_provider(settings.get("provider") or "lmstudio")
+    names = load_prefs().preferred_for(provider)
+    seen = {n.lower() for n in names}
+    for e in cached_entries(provider, settings.get("base_url")) or ():
+        if e.id.lower() not in seen:
+            seen.add(e.id.lower())
+            names.append(e.id)
+    return names
 
 
 def _repl_tools(tools: list, mcp_manager=None, a2a_manager=None) -> str:
@@ -12004,6 +12411,28 @@ def execute_input(
                 verbose=ctx.verbose,
             )
             ctx.current_profile = new_profile
+            return StepResult(kind="state_change", text=msg, is_error=err)
+
+        if cmd == "/model":
+            new_last, msg, err = _repl_model(
+                cmd_arg,
+                profiles=ctx.profiles,
+                current_profile=ctx.current_profile,
+                startup_profile=ctx.startup_profile,
+                raw_baseline=ctx.raw_llm_baseline,
+                pre_profile_baseline=ctx.pre_profile_baseline,
+                repl_kwargs=ctx.loop_kwargs,
+                subagent_manager=ctx.subagent_manager,
+                last_model=ctx.last_model,
+                interactive=(
+                    mode == "repl"
+                    and ctx.interactive
+                    and sys.stdin.isatty()
+                    and sys.stderr.isatty()
+                ),
+                verbose=ctx.verbose,
+            )
+            ctx.last_model = new_last
             return StepResult(kind="state_change", text=msg, is_error=err)
 
         if cmd == "/remember":
@@ -13085,7 +13514,6 @@ def repl_loop(
     kb = _repl_key_bindings()
 
     turn_state = {"max_turns": max_turns, "turns_used": 0}
-    _context_limit = context_length or 128000
     _toolbar_tips = [
         "Shift+Enter newline │ @ file │ / commands │ ! shell",
         "/compact to free context │ /status for session info",
@@ -13096,7 +13524,8 @@ def repl_loop(
         "^R history │ Shift+Enter/^J for multiline input",
         "pipe input: echo 'task' | swival │ output goes to stdout",
         "/clear to start fresh │ /continue to reset turn counter",
-        "/profile to switch models mid-session",
+        "/profile to switch providers mid-session",
+        "/model to pick a model │ /model --fav to tag favorites",
         "/remember to persist a project fact to AGENTS.md",
         "/learn to review mistakes and save lessons",
         "/init to auto-detect project conventions",
@@ -13130,7 +13559,10 @@ def repl_loop(
         except Exception:
             _toolbar_state["git_dirty"] = 0
         ctx_tokens = estimate_tokens(messages, tools)
-        _toolbar_state["ctx_pct"] = min(100, int(ctx_tokens * 100 / _context_limit))
+        # Late-bound on purpose: /profile and /model can change the context
+        # window mid-session, and _repl_loop_kwargs is where they commit it.
+        _limit = _repl_loop_kwargs.get("context_length") or 128000
+        _toolbar_state["ctx_pct"] = min(100, int(ctx_tokens * 100 / _limit))
         if report:
             _toolbar_state["total_tok"] = sum(
                 e.get("prompt_tokens_est", 0)
@@ -13138,8 +13570,6 @@ def repl_loop(
                 if e.get("type") == "llm_call"
             )
         _toolbar_state["tip_idx"] += 1
-
-    _refresh_toolbar_state()
 
     _S = "class:bottom-toolbar"
     _S_KEY = "class:bottom-toolbar.key"
@@ -13279,6 +13709,7 @@ def repl_loop(
         storm_breaker_enabled=storm_breaker_enabled,
         session=session,
     )
+    _refresh_toolbar_state()
 
     ctx = InputContext(
         messages=messages,
@@ -13311,6 +13742,8 @@ def repl_loop(
         trace_dir=trace_dir,
         loop_registry=loop_registry,
     )
+
+    completer.model_candidates = lambda: _model_completion_candidates(ctx)
 
     _exit_outcome = "error"
     _exit_code = 1
