@@ -920,6 +920,12 @@ _THINK_TAG_LINE_RE = re.compile(r"(?mi)^\s*</?think>\s*$\n?")
 # streamed the hidden reasoning separately but still emits the closing tag
 # in the visible content channel.
 _LEAKED_THINK_HEAD_RE = re.compile(r"\A\s*</?think>\s*\n+", re.IGNORECASE)
+_LEAKED_CHANNEL_HEAD_RE = re.compile(
+    r"\A\s*<\|channel>\s*"
+    r"(?:analysis|commentary|final|reasoning|thought)"
+    r"\s*<channel\|>\s*",
+    re.IGNORECASE,
+)
 
 
 TRUNCATED_REASON_LENGTH = "length"
@@ -1469,6 +1475,7 @@ def _sanitize_assistant_content(text: str) -> str:
         return text
 
     cleaned = _SPECIAL_TOKEN_RE.sub("", text)
+    cleaned = _LEAKED_CHANNEL_HEAD_RE.sub("", cleaned, count=1)
     while True:
         updated = _THINK_BLOCK_PREFIX_RE.sub("", cleaned, count=1)
         if "</think>" in updated.lower():
@@ -1509,8 +1516,16 @@ def _strip_leaked_think_head(text: str) -> str:
     return _LEAKED_THINK_HEAD_RE.sub("", text, count=1)
 
 
+def _strip_leaked_channel_head(text: str) -> str:
+    """Remove a leaked chat-template channel marker at the start of content."""
+    if not text or "<|channel>" not in text[:64].lower():
+        return text
+    return _LEAKED_CHANNEL_HEAD_RE.sub("", text, count=1)
+
+
 def _strip_leaked_think_head_message(msg) -> None:
     _apply_to_msg_content(msg, _strip_leaked_think_head)
+    _apply_to_msg_content(msg, _strip_leaked_channel_head)
 
 
 def _post_process_assistant_message(msg, sanitize_thinking: bool) -> None:

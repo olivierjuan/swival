@@ -22,6 +22,7 @@ from swival.agent import (
     _promote_reasoning_content,
     _resolve_model_str,
     _sanitize_assistant_content,
+    _strip_leaked_channel_head,
     _strip_leaked_think_head,
 )
 from swival.config import ConfigError
@@ -444,6 +445,10 @@ class TestAssistantContentSanitization:
         text = "<|start_header_id|><think>Plan</think>\n\nAnswer"
         assert _sanitize_assistant_content(text) == "Answer"
 
+    def test_sanitize_assistant_content_strips_channel_prefix(self):
+        text = "<|channel>thought\n<channel|>Answer"
+        assert _sanitize_assistant_content(text) == "Answer"
+
     def test_sanitize_assistant_content_handles_repeated_think_blocks(self):
         text = "<think>one</think>\n<think>two</think>\nFinal"
         assert _sanitize_assistant_content(text) == "Final"
@@ -610,6 +615,18 @@ class TestAssistantContentSanitization:
         )
         assert _strip_leaked_think_head(text) == text
 
+    def test_strip_leaked_channel_head_basic(self):
+        text = "<|channel>thought\n<channel|>There are 24 words."
+        assert _strip_leaked_channel_head(text) == "There are 24 words."
+
+    def test_strip_leaked_channel_head_with_leading_whitespace(self):
+        text = "  \n<|channel>final\n<channel|>\nAnswer."
+        assert _strip_leaked_channel_head(text) == "Answer."
+
+    def test_strip_leaked_channel_head_preserves_mid_content_marker(self):
+        text = "Example:\n<|channel>thought\n<channel|>Answer."
+        assert _strip_leaked_channel_head(text) == text
+
     def test_call_llm_strips_leaked_close_tag_without_sanitize_flag(self):
         """A bare leading </think> is always stripped, even with sanitize_thinking off."""
         message = types.SimpleNamespace(
@@ -637,6 +654,34 @@ class TestAssistantContentSanitization:
             )
 
         assert msg.content == "Here are your services."
+
+    def test_call_llm_strips_leaked_channel_head_without_sanitize_flag(self):
+        """A bare leading channel marker is always stripped, even with sanitize_thinking off."""
+        message = types.SimpleNamespace(
+            role="assistant",
+            content="<|channel>thought\n<channel|>There are 24 words.",
+            tool_calls=None,
+        )
+        response = types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=message, finish_reason="stop")]
+        )
+
+        with patch("litellm.completion", return_value=response):
+            msg, *_ = call_llm(
+                "http://localhost:8080/v1",
+                "my-model",
+                [{"role": "user", "content": "hi"}],
+                100,
+                0.5,
+                1.0,
+                None,
+                None,
+                False,
+                provider="generic",
+                api_key="sk-test",
+            )
+
+        assert msg.content == "There are 24 words."
 
     def test_call_llm_preserves_inline_literal_think_tag(self):
         message = types.SimpleNamespace(
