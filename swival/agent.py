@@ -4477,13 +4477,45 @@ def _resolve_model_str(provider: str, model_id: str) -> str:
         return model_id
 
 
+def _chatgpt_responses_template(model_cost: dict) -> dict:
+    """Pick an existing ChatGPT Responses model to seed a synthetic entry.
+
+    Prefer the highest-versioned base model so a freshly-released gpt-5.x id
+    inherits a realistic context window and capability flags.
+    Every ChatGPT-backend model routes through the Responses API, so any of
+    them is a safe template.
+    """
+    best_info = None
+    best_rank = None
+    for key, info in model_cost.items():
+        if not key.startswith("chatgpt/") or info.get("mode") != "responses":
+            continue
+        m = re.match(r"chatgpt/gpt-(\d+(?:\.\d+)?)", key)
+        if not m:
+            continue
+        # Rank by version, then prefer the shortest id (the plain base model
+        # over -codex/-pro/-mini variants) at an equal version.
+        rank = (float(m.group(1)), -len(key))
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best_info = info
+    return dict(best_info) if best_info else {}
+
+
 def _ensure_chatgpt_responses_model_registered(litellm_module, model_str: str) -> None:
-    """Teach older LiteLLM releases about new ChatGPT Responses models."""
+    """Teach older LiteLLM releases about new ChatGPT Responses models.
+
+    LiteLLM only routes a chatgpt model through the Responses API when its
+    registry entry carries ``mode: responses``.
+    Newly shipped Codex models (gpt-5.6-terra, -luna, -sol, ...) predate the
+    bundled cost map, so without this they fall through to Chat Completions
+    and hit a Cloudflare challenge instead of the Codex backend.
+    """
     if not model_str.startswith("chatgpt/"):
         return
 
     bare = model_str.removeprefix("chatgpt/")
-    if bare.startswith("responses/") or not bare.startswith("gpt-5"):
+    if not bare.startswith("gpt"):
         return
 
     model_cost = getattr(litellm_module, "model_cost", {}) or {}
@@ -4493,12 +4525,9 @@ def _ensure_chatgpt_responses_model_registered(litellm_module, model_str: str) -
 
     source_info = dict(model_cost.get(bare) or {})
     if not source_info:
-        source_info = dict(model_cost.get("chatgpt/gpt-5.5") or {})
+        source_info = _chatgpt_responses_template(model_cost)
     if not source_info:
-        try:
-            source_info = dict(litellm_module.get_model_info("chatgpt/gpt-5.5"))
-        except Exception:
-            return
+        source_info = {"max_input_tokens": 400000, "supports_function_calling": True}
 
     source_info.pop("key", None)
     source_info.update(

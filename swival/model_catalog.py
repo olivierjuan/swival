@@ -616,6 +616,9 @@ def _fetch_google(base_url: str | None, api_key: str | None, timeout: float):
     return Catalog(entries, source="Google Gemini")
 
 
+_EXTRA_CHATGPT_MODELS = ("gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol")
+
+
 def _fetch_chatgpt(base_url: str | None, api_key: str | None, timeout: float):
     """List ChatGPT-backend models from litellm's local cost registry.
 
@@ -634,7 +637,7 @@ def _fetch_chatgpt(base_url: str | None, api_key: str | None, timeout: float):
         raise CatalogUnavailable(f"could not load the litellm model registry: {e}")
 
     entries = []
-    for key, info in sorted(registry.items()):
+    for key, info in registry.items():
         if not key.startswith("chatgpt/"):
             continue
         bare = key.removeprefix("chatgpt/")
@@ -647,6 +650,19 @@ def _fetch_chatgpt(base_url: str | None, api_key: str | None, timeout: float):
                 supports_tools=info.get("supports_function_calling"),
             )
         )
+    # Codex-backend models newer than litellm's bundled registry. The ChatGPT
+    # OAuth backend has no listing endpoint, so we surface these by name until a
+    # litellm release ships them. They all route through the Responses API.
+    # Borrow the largest advertised window so the display tracks litellm rather
+    # than a frozen constant.
+    existing = {e.id for e in entries}
+    default_ctx = max((e.context_length or 0 for e in entries), default=0) or None
+    for bare in _EXTRA_CHATGPT_MODELS:
+        if bare not in existing:
+            entries.append(
+                ModelEntry(id=bare, context_length=default_ctx, supports_tools=True)
+            )
+    entries.sort(key=lambda e: e.id)
     if not entries:
         raise CatalogUnavailable(
             "no ChatGPT models found in the litellm registry",

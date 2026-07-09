@@ -274,6 +274,19 @@ def test_llamacpp_props_failure_is_tolerated(monkeypatch):
     assert catalog.entries[0].context_length is None
 
 
+def test_chatgpt_catalog_includes_new_codex_models():
+    """The bundled litellm registry lags behind the Codex backend, so the
+    catalog supplements it with known-current model names."""
+    catalog = mc.list_models("chatgpt")
+    ids = [e.id for e in catalog.entries]
+
+    for expected in ("gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol"):
+        assert expected in ids
+    # No duplicates, and entries stay sorted by id.
+    assert len(ids) == len(set(ids))
+    assert ids == sorted(ids)
+
+
 def test_openrouter_catalog(monkeypatch):
     payload = {
         "data": [
