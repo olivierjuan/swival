@@ -2,6 +2,13 @@
 
 All notable user-facing changes to Swival.
 
+## 1.0.38
+
+- Added an experimental `python` tool. It runs a Python snippet straight through a fresh `python -c` subprocess in the workspace, with no shell in between, so there is nothing to quote or escape. It only shows up with `--commands all` or `--yolo`, when a Python interpreter is available, and when the detected context window is at least 100,000 tokens, the same floor that auto-enables subagents.
+- Added a temporary hack to support the newly released ChatGPT models (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.6-sol`)
+- Gemma models sometimes leak a chat-template `<|channel>` marker at the very start of their visible reply. That stray marker is now stripped instead of ending up in the answer.
+- The metaskills install hint now recommends `uv tool install 'swival[metaskills]'`, matching how Swival itself is installed, both in the documentation and in the error shown when the Starlark runtime is missing.
+
 ## 1.0.37
 
 - Whether Swival replays `reasoning_content` back to a provider is now decided by the endpoint it is talking to, not by the model's name. A DeepSeek or Kimi model served through Hugging Face, OpenRouter, or a local server was previously flagged as requiring the field, and several of those routers reject it outright.
