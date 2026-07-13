@@ -168,6 +168,14 @@ The server supports five JSON-RPC methods:
 
 Task outcomes map from Session results: a successful `ask()` produces a `completed` task, an exhausted run with no answer produces `input-required` (needs more information), an exhausted run with a partial answer or an exception produces `failed`, and a cancelled task produces `canceled`.
 
+### Trust Model
+
+The server exposes a single agent: one provider, one model, and one working directory. It is single-tenant by design. There is no per-caller identity, so the optional `--serve-auth-token` is the entire authority boundary, and every client that can reach the server is treated as the same trusted principal.
+
+`contextId` and `taskId` are conversation and task handles, not access credentials. Any client holding one can resume, inspect, or cancel the corresponding work, which is exactly what makes multi-turn conversations possible. When a client does not supply its own, the server generates unguessable UUIDs, so possessing one means it was handed to you.
+
+Per-context scratch directories keep concurrent conversations from clobbering each other's temp files. They are not a security boundary: every context shares the same base directory, so treat the whole server as one workspace at one trust level. To serve mutually distrusting users, run a separate server per user, each with its own base directory and token.
+
 ### Streaming
 
 When a client sends `SendStreamingMessage`, the server returns an SSE stream instead of a single JSON-RPC response. The stream emits:
