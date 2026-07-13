@@ -235,6 +235,10 @@ result = session.run(&quot;Ask the research agent to summarize recent papers on 
 <li><strong>CancelTask</strong>: signals a running task to stop; the agent loop checks the cancellation flag between tool calls and at the start of each turn</li>
 </ul>
 <p>Task outcomes map from Session results: a successful <code>ask()</code> produces a <code>completed</code> task, an exhausted run with no answer produces <code>input-required</code> (needs more information), an exhausted run with a partial answer or an exception produces <code>failed</code>, and a cancelled task produces <code>canceled</code>.</p>
+<h3 id="trust-model">Trust Model</h3>
+<p>The server exposes a single agent: one provider, one model, and one working directory. It is single-tenant by design. There is no per-caller identity, so the optional <code>--serve-auth-token</code> is the entire authority boundary, and every client that can reach the server is treated as the same trusted principal.</p>
+<p><code>contextId</code> and <code>taskId</code> are conversation and task handles, not access credentials. Any client holding one can resume, inspect, or cancel the corresponding work, which is exactly what makes multi-turn conversations possible. When a client does not supply its own, the server generates unguessable UUIDs, so possessing one means it was handed to you.</p>
+<p>Per-context scratch directories keep concurrent conversations from clobbering each other's temp files. They are not a security boundary: every context shares the same base directory, so treat the whole server as one workspace at one trust level. To serve mutually distrusting users, run a separate server per user, each with its own base directory and token.</p>
 <h3 id="streaming">Streaming</h3>
 <p>When a client sends <code>SendStreamingMessage</code>, the server returns an SSE stream instead of a single JSON-RPC response. The stream emits:</p>
 <ul>
