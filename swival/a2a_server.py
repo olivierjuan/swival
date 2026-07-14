@@ -563,8 +563,27 @@ class A2aServer:
         # Resolve context from existing task if resuming
         if task_id:
             existing_task = self._tasks.get(task_id)
-            if existing_task is not None:
-                context_id = existing_task.context_id
+            if existing_task is None:
+                return (
+                    _jsonrpc_error(
+                        req_id, TASK_NOT_FOUND, f"Task not found: {task_id}"
+                    ),
+                    "",
+                    None,
+                    None,
+                )
+            if context_id and context_id != existing_task.context_id:
+                return (
+                    _jsonrpc_error(
+                        req_id,
+                        INVALID_PARAMS,
+                        "contextId does not match taskId",
+                    ),
+                    "",
+                    None,
+                    None,
+                )
+            context_id = existing_task.context_id
 
         if not context_id:
             context_id = str(uuid.uuid4())

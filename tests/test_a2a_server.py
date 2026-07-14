@@ -7,7 +7,13 @@ import uuid
 
 import pytest
 
-from swival.a2a_server import A2aServer, A2aTask, build_agent_card
+from swival.a2a_server import (
+    INVALID_PARAMS,
+    TASK_NOT_FOUND,
+    A2aServer,
+    A2aTask,
+    build_agent_card,
+)
 from swival.session import Result
 
 
@@ -66,6 +72,43 @@ def _make_input_required_result():
         messages=[{"role": "user", "content": "test"}],
         report=None,
     )
+
+
+def _server_execution_state(server):
+    return {
+        "sessions": {
+            context_id: (
+                id(session),
+                id(getattr(session, "cancel_flag", None)),
+                id(getattr(session, "event_callback", None)),
+            )
+            for context_id, session in server._sessions.items()
+        },
+        "session_access": dict(server._session_access),
+        "context_locks": {
+            context_id: (id(lock), lock.locked())
+            for context_id, lock in server._context_locks.items()
+        },
+        "tasks": {
+            task_id: (
+                id(task),
+                task.context_id,
+                task.status,
+                json.dumps(task.messages, sort_keys=True),
+                json.dumps(task.artifacts, sort_keys=True),
+                task.created_at,
+                task.updated_at,
+                id(task.cancel_flag),
+                task.cancel_flag.is_set(),
+            )
+            for task_id, task in server._tasks.items()
+        },
+        "context_tasks": {
+            context_id: tuple(task_ids)
+            for context_id, task_ids in server._context_tasks.items()
+        },
+        "active_contexts": set(server._active_contexts),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +255,96 @@ class TestInputRequired:
         task_id = t1["id"]
 
         # Follow-up with taskId resumes
-        resp2 = _send_message(client, "More info", context_id=ctx, task_id=task_id)
+        resp2 = _send_message(client, "More info", task_id=task_id)
         t2 = resp2.json()["result"]
         assert t2["status"]["state"] == "completed"
+        assert t2["contextId"] == ctx
+        assert t2["id"] == task_id
+        assert call_count[0] == 2
+        assert server._context_tasks == {ctx: [task_id]}
+        assert set(server._tasks) == {task_id}
+
+
+class TestTaskReferenceValidation:
+    @pytest.mark.parametrize("method", ["SendMessage", "SendStreamingMessage"])
+    def test_unknown_task_id_is_rejected_without_state(
+        self, method, monkeypatch, server, client
+    ):
+        from swival import session as session_mod
+
+        calls = []
+
+        def record_ask(self, question):
+            calls.append(question)
+            return _make_result()
+
+        monkeypatch.setattr(session_mod.Session, "ask", record_ask)
+        task_id = "unknown-task"
+        message = {
+            "role": "user",
+            "parts": [{"type": "text", "text": "Continue"}],
+            "taskId": task_id,
+        }
+        state = _server_execution_state(server)
+
+        response = client.post(
+            "/",
+            json=_jsonrpc(method, {"message": message}),
+        )
+
+        body = response.json()
+        error = body["error"]
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert error["code"] == TASK_NOT_FOUND
+        assert task_id in error["message"]
+        assert "result" not in body
+        assert calls == []
+        assert _server_execution_state(server) == state
+        assert server._concurrency_sem is not None
+        assert server._concurrency_sem._value == server._max_concurrent  # noqa: SLF001
+
+    @pytest.mark.parametrize("method", ["SendMessage", "SendStreamingMessage"])
+    def test_mismatched_context_is_rejected_without_state_change(
+        self, method, monkeypatch, server, client
+    ):
+        from swival import session as session_mod
+
+        calls = []
+
+        def record_ask(self, question):
+            calls.append(question)
+            return _make_input_required_result()
+
+        monkeypatch.setattr(session_mod.Session, "ask", record_ask)
+        task = _send_message(client, "Start", context_id="right-context").json()[
+            "result"
+        ]
+        assert task["status"]["state"] == "input-required"
+        state = _server_execution_state(server)
+        message = {
+            "role": "user",
+            "parts": [{"type": "text", "text": "Continue"}],
+            "contextId": "wrong-context",
+            "taskId": task["id"],
+        }
+
+        response = client.post(
+            "/",
+            json=_jsonrpc(method, {"message": message}),
+        )
+
+        body = response.json()
+        error = body["error"]
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert error["code"] == INVALID_PARAMS
+        assert "contextId" in error["message"]
+        assert "result" not in body
+        assert calls == ["Start"]
+        assert _server_execution_state(server) == state
+        assert server._concurrency_sem is not None
+        assert server._concurrency_sem._value == server._max_concurrent  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -952,6 +1082,33 @@ class TestSendStreamingMessage:
         # Should be a normal JSON error response, not SSE
         body = resp.json()
         assert "error" in body
+
+    def test_task_id_without_context_resumes_task(self, monkeypatch, server, client):
+        from swival import session as session_mod
+
+        call_count = [0]
+
+        def mock_ask(self, question):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return _make_input_required_result()
+            return _make_result("resumed answer")
+
+        monkeypatch.setattr(session_mod.Session, "ask", mock_ask)
+        context_id = str(uuid.uuid4())
+        task = _send_message(client, "Start", context_id=context_id).json()["result"]
+        task_id = task["id"]
+
+        response = _send_streaming_message(client, "More info", task_id=task_id)
+        events = _parse_sse_events(response.text)
+
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert all(event[1]["taskId"] == task_id for event in events)
+        assert all(event[1]["contextId"] == context_id for event in events)
+        assert events[-1][1]["status"]["state"] == "completed"
+        assert call_count[0] == 2
+        assert server._context_tasks == {context_id: [task_id]}
+        assert set(server._tasks) == {task_id}
 
     def test_streaming_with_event_callback(self, monkeypatch):
         """SSE stream maps event_callback events to SSE frames."""
