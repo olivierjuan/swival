@@ -6218,7 +6218,7 @@ def build_parser():
         help='Extra parameters to pass to the LLM API as JSON (e.g. \'{"chat_template_kwargs": {"enable_thinking": false}}\').',
     )
 
-    _REASONING_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "default")
+    _REASONING_LEVELS = ("none", "minimal", "low", "medium", "high", "max", "xhigh", "default")
     provider_group.add_argument(
         "--reasoning-effort",
         choices=_REASONING_LEVELS,
@@ -12579,6 +12579,15 @@ def execute_input(
         if cmd == "/audit":
             return _execute_audit(cmd_arg, ctx)
 
+        if cmd == "/review-issues":
+            return _execute_review_issues(cmd_arg, ctx)
+
+        if cmd == "/review":
+            return _execute_review(cmd_arg, ctx)
+
+        if cmd == "/fix":
+            return _execute_fix(cmd_arg, ctx)
+
         if cmd == "/loop":
             return _execute_loop(cmd_arg, ctx, mode=mode)
 
@@ -12700,6 +12709,63 @@ def _execute_audit(cmd_arg: str, ctx: InputContext) -> StepResult:
 
     if not ctx.no_history and result:
         append_history(ctx.base_dir, "/audit", result, diagnostics=ctx.verbose)
+    return StepResult(kind="agent_turn", text=result)
+
+
+def _execute_review_issues(cmd_arg: str, ctx: InputContext) -> StepResult:
+    """Handle the /review-issues command by delegating to swival.review_issues."""
+    from .review_issues import run_review_issues_command
+
+    try:
+        result = run_review_issues_command(cmd_arg, ctx)
+    except KeyboardInterrupt:
+        fmt.warning("interrupted, review-issues aborted.")
+        return StepResult(kind="agent_turn", interrupted=True)
+    except Exception as e:
+        return StepResult(
+            kind="agent_turn", text=f"error: review-issues failed: {e}", is_error=True
+        )
+
+    if not ctx.no_history and result:
+        append_history(ctx.base_dir, "/review-issues", result, diagnostics=ctx.verbose)
+    return StepResult(kind="agent_turn", text=result)
+
+
+def _execute_review(cmd_arg: str, ctx: InputContext) -> StepResult:
+    """Handle the /review command by delegating to swival.review."""
+    from .review import run_review_command
+
+    try:
+        result = run_review_command(cmd_arg, ctx)
+    except KeyboardInterrupt:
+        fmt.warning("interrupted, review aborted.")
+        return StepResult(kind="agent_turn", interrupted=True)
+    except Exception as e:
+        return StepResult(
+            kind="agent_turn", text=f"error: review failed: {e}", is_error=True
+        )
+
+    if not ctx.no_history and result:
+        append_history(ctx.base_dir, "/review", result, diagnostics=ctx.verbose)
+    return StepResult(kind="agent_turn", text=result)
+
+
+def _execute_fix(cmd_arg: str, ctx: InputContext) -> StepResult:
+    """Handle the /fix command by delegating to swival.fix."""
+    from .fix import run_fix_command
+
+    try:
+        result = run_fix_command(cmd_arg, ctx)
+    except KeyboardInterrupt:
+        fmt.warning("interrupted, fix aborted.")
+        return StepResult(kind="agent_turn", interrupted=True)
+    except Exception as e:
+        return StepResult(
+            kind="agent_turn", text=f"error: fix failed: {e}", is_error=True
+        )
+
+    if not ctx.no_history and result:
+        append_history(ctx.base_dir, "/fix", result, diagnostics=ctx.verbose)
     return StepResult(kind="agent_turn", text=result)
 
 

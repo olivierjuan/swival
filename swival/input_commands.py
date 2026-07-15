@@ -56,6 +56,89 @@ INPUT_COMMANDS: dict[str, CommandInfo] = {
             ),
         ),
     ),
+    "/review-issues": CommandInfo(
+        desc="Review GitLab issue validity (real vs false-positive) against committed code",
+        arg="<project> --tag <tag>",
+        kind="agent_turn",
+        modes=("repl", "oneshot"),
+        options=(
+            ("--tag <tag>", "Only issues carrying this GitLab label"),
+            ("--from N", "Start of issue-IID range (inclusive)"),
+            ("--to M", "End of issue-IID range (inclusive)"),
+            (
+                "--state open|closed|all",
+                "Issue state to review (default: open)",
+            ),
+            ("--workers N", "Number of parallel verification workers (default: 4)"),
+            ("--resume", "Resume a previous run from its last checkpoint"),
+            (
+                "--dry-run",
+                "Run the full pipeline and produce the report, but do not "
+                "write labels back to GitLab",
+            ),
+            (
+                "--debug",
+                "Write a real-time JSONL debug log to "
+                ".swival/review-issues/debug.jsonl",
+            ),
+        ),
+    ),
+    "/review": CommandInfo(
+        desc="Run a staged code review over tracked committed code (design, "
+        "consistency, flaw, smell, bug, performance)",
+        arg="[path|glob ...]",
+        kind="agent_turn",
+        modes=("repl", "oneshot"),
+        options=(
+            ("--resume", "Resume a previous review run from its last checkpoint"),
+            ("--regen", "Regenerate reports and patches for a completed review run"),
+            (
+                "--finding N[,M-R]",
+                "With --regen, regenerate only the selected 1-based Phase-5 "
+                "findings (comma-separated values and ranges allowed)",
+            ),
+            (
+                "--all",
+                "Deep-review every file in scope; skip the triage selection",
+            ),
+            ("--workers N", "Number of parallel verification workers (default: 4)"),
+            (
+                "--patch-max-turns N",
+                "Phase-5 patch-generation turn budget (default: 50)",
+            ),
+            (
+                "--debug",
+                "Write a real-time JSONL debug log to .swival/review/debug.jsonl",
+            ),
+        ),
+    ),
+    "/fix": CommandInfo(
+        desc="Fix open GitLab issues (project + tag): generate a fix, verify it, "
+        "check docs/spec sync, commit, close the issue, update the findings README",
+        arg="<project> --tag <tag>",
+        kind="agent_turn",
+        modes=("repl", "oneshot"),
+        options=(
+            ("--tag <tag>", "Only open issues carrying this GitLab label"),
+            ("--from N", "Start of issue-IID range (inclusive)"),
+            ("--to M", "End of issue-IID range (inclusive)"),
+            ("--workers N", "Number of parallel fix/verify workers (default: 4)"),
+            (
+                "--patch-max-turns N",
+                "Fix-generation turn budget (default: 50)",
+            ),
+            ("--resume", "Resume a previous run from its last checkpoint"),
+            (
+                "--dry-run",
+                "Run the full pipeline and produce the report, but do not "
+                "commit, close issues, or write labels to GitLab",
+            ),
+            (
+                "--debug",
+                "Write a real-time JSONL debug log to .swival/fix/debug.jsonl",
+            ),
+        ),
+    ),
     "/add-dir": CommandInfo(
         desc="Grant read+write access to a directory",
         arg="<path>",

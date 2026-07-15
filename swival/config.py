@@ -23,7 +23,7 @@ _UNSET = object()  # Sentinel for "not set by CLI"
 # --- Schema ---
 
 SANDBOX_MODES = ("builtin", "agentfs", "nono")
-REASONING_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "default")
+REASONING_LEVELS = ("none", "minimal", "low", "medium", "high", "max", "xhigh", "default")
 
 PROFILE_KEYS: set[str] = {
     "description",
